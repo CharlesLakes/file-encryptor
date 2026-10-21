@@ -29,10 +29,10 @@ static void check_extract_all(archive *a, const char *out_name){
   char out[PATH_MAX];
   path_in(out, out_name);
   CHECK(make_dir(out) == 0);
-  for(unsigned int i = 0; i < a->entries.size(); i++){
-    const char *name = archive_get_entry(a, i)->name;
-    CHECK(archive_extract_entry(a, i, out) == 1);
-    CHECK(archive_extract_entry(a, i, out) == 0);   /* Already exists: skipped. */
+  for(unsigned int i = 0; i < a->entries().size(); i++){
+    const char *name = a->entries()[i].name.c_str();
+    CHECK(a->extract(i, out) == extract_result::extracted);
+    CHECK(a->extract(i, out) == extract_result::skipped);
     char original[PATH_MAX], extracted[PATH_MAX];
     path_in(original, name);
     join_path(extracted, sizeof(extracted), out, name);
@@ -70,38 +70,37 @@ static void check_v2_fixture(const char *fixtures){
   make_file("chunks.bin", 3*CHUNK + 5, 3);
 
   archive a;
-  archive_init(&a);
-  CHECK(!archive_open(&a, crls, "wrong-password"));
-  CHECK(archive_open(&a, crls, "fixture-password"));
-  CHECK(a.entries.size() == 3);
-  if(a.entries.size() == 3){
-    CHECK(strcmp(archive_get_entry(&a, 0)->name, "empty.bin") == 0);
-    CHECK(strcmp(archive_get_entry(&a, 1)->name, "small.txt") == 0);
-    CHECK(strcmp(archive_get_entry(&a, 2)->name, "chunks.bin") == 0);
+  CHECK(!a.open(crls, "wrong-password"));
+  CHECK(a.open(crls, "fixture-password"));
+  CHECK(a.entries().size() == 3);
+  if(a.entries().size() == 3){
+    CHECK(a.entries()[0].name == "empty.bin");
+    CHECK(a.entries()[1].name == "small.txt");
+    CHECK(a.entries()[2].name == "chunks.bin");
   }
-  CHECK(archive_wasted_space(&a) > 0);                /* The deleted file and the old indexes. */
-  CHECK(a.version == 2);
+  CHECK(a.wasted_space() > 0);                /* The deleted file and the old indexes. */
+  CHECK(a.version() == 2);
   check_extract_all(&a, "out_v2");
 
   /* A version 2 archive can still be modified, and stays version 2... */
   char file[PATH_MAX];
   make_file("added.bin", 70000, 5);
   path_in(file, "added.bin");
-  CHECK(archive_add_file(&a, file));
-  CHECK(a.version == 2);
+  CHECK(a.add_file(file));
+  CHECK(a.version() == 2);
 
   /* ...until it is compacted, which converts it to version 3. */
-  CHECK(archive_compact(&a));
-  CHECK(a.version == 3);
-  CHECK(archive_wasted_space(&a) == 0);
-  archive_close(&a);
+  CHECK(a.compact());
+  CHECK(a.version() == 3);
+  CHECK(a.wasted_space() == 0);
+  a.close();
 
   CHECK(header_version(crls) == 3);
-  CHECK(!archive_open(&a, crls, "wrong-password"));
-  CHECK(archive_open(&a, crls, "fixture-password"));
-  CHECK(a.version == 3 && a.entries.size() == 4);
+  CHECK(!a.open(crls, "wrong-password"));
+  CHECK(a.open(crls, "fixture-password"));
+  CHECK(a.version() == 3 && a.entries().size() == 4);
   check_extract_all(&a, "out_v2_compacted");
-  archive_free(&a);
+  a.close();
 }
 
 /**
@@ -115,25 +114,24 @@ static void check_header_tampering(const char *crls, const char *password){
   CHECK(f != NULL);
   if(!f) return;
   archive a;
-  archive_init(&a);
-  for(long i = 0; i < V3_AD_BYTES; i++){
+  for(long i = 0; i < static_cast<long>(V3_AD_BYTES); i++){
     fseek(f, i, SEEK_SET);
     int c = fgetc(f);
     fseek(f, i, SEEK_SET);
     fputc(c ^ 0xff, f);
     fflush(f);
-    if(archive_open(&a, crls, password)){
+    if(a.open(crls, password)){
       printf("FAIL: archive opened with header byte %ld changed\n", i);
       failures++;
-      archive_close(&a);
+      a.close();
     }
     fseek(f, i, SEEK_SET);
     fputc(c, f);
     fflush(f);
   }
   fclose(f);
-  CHECK(archive_open(&a, crls, password));
-  archive_free(&a);
+  CHECK(a.open(crls, password));
+  a.close();
 }
 
 int main(int argc, char **argv){
@@ -154,45 +152,44 @@ int main(int argc, char **argv){
   path_in(crls, "test.crls");
 
   archive a;
-  archive_init(&a);
 
   /* Create and add. */
   /* Low Argon2id limits keep the test fast; archive_create() uses "moderate". */
-  CHECK(archive_create_params(&a, crls, "password123", 1, 8u << 20));
+  CHECK(a.create(crls, "password123", 1, 8u << 20));
   const char *names[] = {"empty.bin", "small.txt", "exact.bin", "big.bin"};
   for(int i = 0; i < 4; i++){
     path_in(file, names[i]);
-    CHECK(archive_add_file(&a, file));
+    CHECK(a.add_file(file));
   }
   path_in(file, "small.txt");
-  CHECK(!archive_add_file(&a, file));                /* Duplicate name. */
-  CHECK(!archive_add_file(&a, crls));                /* Itself. */
-  CHECK(a.entries.size() == 4);
-  CHECK(archive_total_size(&a) == 1000 + CHUNK + 3*CHUNK + 123);
-  CHECK(a.version == 3 && a.header_bytes == V3_HEADER_BYTES);
-  archive_close(&a);
+  CHECK(!a.add_file(file));                /* Duplicate name. */
+  CHECK(!a.add_file(crls));                /* Itself. */
+  CHECK(a.entries().size() == 4);
+  CHECK(a.total_size() == 1000 + CHUNK + 3*CHUNK + 123);
+  CHECK(a.version() == 3 && a.header_bytes() == V3_HEADER_BYTES);
+  a.close();
   CHECK(header_version(crls) == 3);
   check_header_tampering(crls, "password123");
 
   /* Reopen. */
-  CHECK(!archive_open(&a, crls, "wrong-password"));
-  CHECK(archive_open(&a, crls, "password123"));
-  CHECK(a.entries.size() == 4);
+  CHECK(!a.open(crls, "wrong-password"));
+  CHECK(a.open(crls, "password123"));
+  CHECK(a.entries().size() == 4);
   check_extract_all(&a, "out1");
 
   /* Delete leaves unused space; compact reclaims it. */
-  CHECK(archive_delete_entry(&a, 1));
-  CHECK(a.entries.size() == 3);
-  CHECK(strcmp(archive_get_entry(&a, 1)->name, "exact.bin") == 0);
-  CHECK(archive_wasted_space(&a) > 0);
-  CHECK(archive_compact(&a));
-  CHECK(archive_wasted_space(&a) == 0);
-  archive_close(&a);
+  CHECK(a.remove(1));
+  CHECK(a.entries().size() == 3);
+  CHECK(a.entries()[1].name == "exact.bin");
+  CHECK(a.wasted_space() > 0);
+  CHECK(a.compact());
+  CHECK(a.wasted_space() == 0);
+  a.close();
 
-  CHECK(archive_open(&a, crls, "password123"));
-  CHECK(a.entries.size() == 3);
+  CHECK(a.open(crls, "password123"));
+  CHECK(a.entries().size() == 3);
   check_extract_all(&a, "out2");
-  archive_free(&a);
+  a.close();
 
   remove_temp_dir();
   return test_summary();

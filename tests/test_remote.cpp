@@ -47,10 +47,10 @@ static void check_extract(archive *a, const char *out){
   char dir[PATH_MAX];
   path_in(dir, out);
   CHECK(make_dir(dir) == 0);
-  for(unsigned int i = 0; i < a->entries.size(); i++){
-    const char *name = archive_get_entry(a, i)->name;
+  for(unsigned int i = 0; i < a->entries().size(); i++){
+    const char *name = a->entries()[i].name.c_str();
     char original[PATH_MAX], extracted[PATH_MAX];
-    CHECK(archive_extract_entry(a, i, dir) == 1);
+    CHECK(a->extract(i, dir) == extract_result::extracted);
     path_in(original, name);
     join_path(extracted, sizeof(extracted), dir, name);
     CHECK(same_files(original, extracted));
@@ -73,14 +73,12 @@ int main(void){
   make_file("upload-c.bin", 10, 35);
 
   archive a, b;
-  archive_init(&a);
-  archive_init(&b);
-  CHECK(archive_create_params(&a, crls, PASSWORD, 1, 8u << 20));
+  CHECK(a.create(crls, PASSWORD, 1, 8u << 20));
   path_in(file, "big.bin");
-  CHECK(archive_add_file(&a, file));
+  CHECK(a.add_file(file));
   path_in(file, "small.txt");
-  CHECK(archive_add_file(&a, file));
-  archive_close(&a);
+  CHECK(a.add_file(file));
+  a.close();
 
   int port = start_test_server(served);
   CHECK(port > 0);
@@ -88,7 +86,7 @@ int main(void){
 
   /* Without the password nothing is visible. */
   CHECK(!remote_open(&a, url, "wrong-password"));
-  CHECK(!a.is_open && a.entries.size() == 0);
+  CHECK(!a.is_open() && a.entries().size() == 0);
   if(strstr(status_text, "libcurl") != NULL){
     printf("SKIP: %s\n", status_text);
     stop_test_server();
@@ -98,7 +96,7 @@ int main(void){
 
   /* With it, the files are listed and extracted byte for byte. */
   CHECK(remote_open(&a, url, PASSWORD));
-  CHECK(a.is_remote && a.entries.size() == 2);
+  CHECK(a.is_remote() && a.entries().size() == 2);
   check_extract(&a, "out1");
 
   /* Uploading sends only the new file and the new index: the archive on the
@@ -106,9 +104,9 @@ int main(void){
   uint64_t before = size_of(crls);
   path_in(file, "upload-a.bin");
   CHECK(remote_add_file(&a, file));
-  CHECK(a.entries.size() == 3);
-  archive_entry *added = archive_get_entry(&a, 2);
-  CHECK(size_of(crls) == before + added->stored + a.index_length);
+  CHECK(a.entries().size() == 3);
+  const archive_entry &added = a.entries()[2];
+  CHECK(size_of(crls) == before + added.stored + a.index_length());
 
   /* Two clients: b opened before a's next upload, so b's first attempt
      conflicts and is rebuilt on top of it. */
@@ -117,42 +115,41 @@ int main(void){
   CHECK(remote_add_file(&a, file));
   path_in(file, "upload-c.bin");
   CHECK(remote_add_file(&b, file));
-  CHECK(b.entries.size() == 5);
-  archive_close(&b);
+  CHECK(b.entries().size() == 5);
+  b.close();
 
   /* A client that does not know the password cannot upload. */
   CHECK(remote_open(&b, url, PASSWORD));
-  memset(b.sign_sk, 9, sizeof(b.sign_sk));
+  memset(b.signing_key().data(), 9, SIGN_SK_BYTES);
   path_in(file, "small.txt");
   CHECK(!remote_add_file(&b, file));                 /* Duplicate name, rejected locally. */
   make_file("upload-d.bin", 5, 36);
   path_in(file, "upload-d.bin");
   CHECK(!remote_add_file(&b, file));
   CHECK(strstr(status_text, "password") != NULL);
-  archive_close(&b);
+  b.close();
 
   /* Everything is there when the archive is opened again, remotely or locally. */
-  archive_close(&a);
+  a.close();
   CHECK(remote_open(&a, url, PASSWORD));
-  CHECK(a.entries.size() == 5);
+  CHECK(a.entries().size() == 5);
   check_extract(&a, "out2");
 
   /* Compacting the archive on the server replaces the file: the open remote
      archive notices and asks to be opened again. */
   archive local;
-  archive_init(&local);
-  CHECK(archive_open(&local, crls, PASSWORD));
-  CHECK(local.entries.size() == 5);
-  CHECK(archive_delete_entry(&local, 4));
-  CHECK(archive_compact(&local));
-  archive_free(&local);
+  CHECK(local.open(crls, PASSWORD));
+  CHECK(local.entries().size() == 5);
+  CHECK(local.remove(4));
+  CHECK(local.compact());
+  local.close();
   char dir[PATH_MAX];
   path_in(dir, "out3");
   CHECK(make_dir(dir) == 0);
-  CHECK(archive_extract_entry(&a, 0, dir) == -1);
+  CHECK(a.extract(0, dir) == extract_result::failed);
   CHECK(strstr(status_text, "Open it again") != NULL);
-  archive_free(&a);
-  archive_free(&b);
+  a.close();
+  b.close();
 
   stop_test_server();
   remove_temp_dir();

@@ -69,11 +69,10 @@ static append_result serve(const char *crls, const append_upload *up){
  */
 static bool prepare(const char *crls, const char *password, const char *file, append_upload *up){
   archive a;
-  archive_init(&a);
   char path[PATH_MAX];
   path_in(path, file);
-  bool ok = archive_open(&a, crls, password) && append_prepare(&a, path, up);
-  archive_free(&a);
+  bool ok = a.open(crls, password) && append_prepare(&a, path, up);
+  a.close();
   return ok;
 }
 
@@ -87,21 +86,20 @@ static bool prepare(const char *crls, const char *password, const char *file, ap
  */
 static void check_contents(const char *crls, const char **names, unsigned int count, const char *out){
   archive a;
-  archive_init(&a);
-  CHECK(archive_open(&a, crls, PASSWORD));
-  CHECK(a.entries.size() == count);
+  CHECK(a.open(crls, PASSWORD));
+  CHECK(a.entries().size() == count);
   char dir[PATH_MAX];
   path_in(dir, out);
   CHECK(make_dir(dir) == 0);
-  for(unsigned int i = 0; i < a.entries.size() && i < count; i++){
-    CHECK(strcmp(archive_get_entry(&a, i)->name, names[i]) == 0);
-    CHECK(archive_extract_entry(&a, i, dir) == 1);
+  for(unsigned int i = 0; i < a.entries().size() && i < count; i++){
+    CHECK(a.entries()[i].name == names[i]);
+    CHECK(a.extract(i, dir) == extract_result::extracted);
     char original[PATH_MAX], extracted[PATH_MAX];
     path_in(original, names[i]);
     join_path(extracted, sizeof(extracted), dir, names[i]);
     CHECK(same_files(original, extracted));
   }
-  archive_free(&a);
+  a.close();
 }
 
 int main(int argc, char **argv){
@@ -120,11 +118,10 @@ int main(int argc, char **argv){
   char crls[PATH_MAX], file[PATH_MAX];
   path_in(crls, "remote.crls");
   archive a;
-  archive_init(&a);
-  CHECK(archive_create_params(&a, crls, PASSWORD, 1, 8u << 20));
+  CHECK(a.create(crls, PASSWORD, 1, 8u << 20));
   path_in(file, "first.bin");
-  CHECK(archive_add_file(&a, file));
-  archive_close(&a);
+  CHECK(a.add_file(file));
+  a.close();
 
   /* A valid upload adds the file; the body is only the new entry and the new
      index, never the files that are already there. */
@@ -144,12 +141,11 @@ int main(int argc, char **argv){
 
   /* So is a signature made without the password: a client that opened the
      archive cannot sign once its secret key is replaced. */
-  archive_init(&a);
-  CHECK(archive_open(&a, crls, PASSWORD));
+  CHECK(a.open(crls, PASSWORD));
   path_in(file, "third.txt");
-  randombytes_buf(a.sign_sk, sizeof(a.sign_sk));
+  randombytes_buf(a.signing_key().data(), SIGN_SK_BYTES);
   CHECK(append_prepare(&a, file, &up));
-  archive_free(&a);
+  a.close();
   CHECK(serve(crls, &up) == APPEND_FORBIDDEN);
   append_discard(&up);
   check_contents(crls, two, 2, "out2");
@@ -164,10 +160,9 @@ int main(int argc, char **argv){
   CHECK(prepare(crls, PASSWORD, "fourth.bin", &up_b));
   CHECK(serve(crls, &up_a) == APPEND_OK);
   CHECK(serve(crls, &up_b) == APPEND_CONFLICT);
-  archive_init(&a);
-  CHECK(archive_open(&a, crls, PASSWORD));
+  CHECK(a.open(crls, PASSWORD));
   CHECK(append_rebase(&a, &up_b));
-  archive_free(&a);
+  a.close();
   CHECK(serve(crls, &up_b) == APPEND_OK);
   append_discard(&up_a);
   append_discard(&up_b);
@@ -220,11 +215,10 @@ int main(int argc, char **argv){
   append_state st;
   CHECK(append_load_state(fd, &st) == APPEND_UNSUPPORTED);
   close(fd);
-  archive_init(&a);
-  CHECK(archive_open(&a, v2, "fixture-password"));
+  CHECK(a.open(v2, "fixture-password"));
   path_in(file, "fifth.bin");
   CHECK(!append_prepare(&a, file, &up));
-  archive_free(&a);
+  a.close();
 
   remove_temp_dir();
   return test_summary();

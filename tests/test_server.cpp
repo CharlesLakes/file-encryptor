@@ -154,11 +154,10 @@ static int post(const char *target, const append_upload *up, uint64_t send){
  */
 static bool prepare(const char *crls, const char *file, append_upload *up){
   archive a;
-  archive_init(&a);
   char path[PATH_MAX];
   path_in(path, file);
-  bool ok = archive_open(&a, crls, PASSWORD) && append_prepare(&a, path, up);
-  archive_free(&a);
+  bool ok = a.open(crls, PASSWORD) && append_prepare(&a, path, up);
+  a.close();
   return ok;
 }
 
@@ -186,11 +185,10 @@ int main(int argc, char **argv){
   make_file("third.bin", 999, 23);
 
   archive a;
-  archive_init(&a);
-  CHECK(archive_create_params(&a, crls, PASSWORD, 1, 8u << 20));
+  CHECK(a.create(crls, PASSWORD, 1, 8u << 20));
   path_in(file, "first.bin");
-  CHECK(archive_add_file(&a, file));
-  archive_close(&a);
+  CHECK(a.add_file(file));
+  a.close();
 
   port = start_test_server(served);
   CHECK(port > 0);
@@ -248,12 +246,11 @@ int main(int argc, char **argv){
   append_discard(&up);
 
   /* A signature made without the password. */
-  archive_init(&a);
-  CHECK(archive_open(&a, crls, PASSWORD));
+  CHECK(a.open(crls, PASSWORD));
   path_in(file, "third.bin");
-  memset(a.sign_sk, 7, sizeof(a.sign_sk));
+  memset(a.signing_key().data(), 7, SIGN_SK_BYTES);
   CHECK(append_prepare(&a, file, &up));
-  archive_free(&a);
+  a.close();
   CHECK(post("/remote.crls", &up, up.claim.content_length) == 403);
   append_discard(&up);
 
@@ -271,10 +268,9 @@ int main(int argc, char **argv){
   close(fd);
 
   /* While the archive is locked (open in the GUI), uploads wait: 423. */
-  archive_init(&a);
-  CHECK(archive_open(&a, crls, PASSWORD));
+  CHECK(a.open(crls, PASSWORD));
   CHECK(post("/remote.crls", &up, up.claim.content_length) == 423);
-  archive_close(&a);
+  a.close();
   CHECK(post("/remote.crls", &up, up.claim.content_length) == 204);
   append_discard(&up);
 
@@ -286,22 +282,21 @@ int main(int argc, char **argv){
   append_discard(&up);
 
   /* The archive now holds the three files, readable with the password. */
-  archive_init(&a);
-  CHECK(archive_open(&a, crls, PASSWORD));
-  CHECK(a.entries.size() == 3);
+  CHECK(a.open(crls, PASSWORD));
+  CHECK(a.entries().size() == 3);
   char out[PATH_MAX];
   path_in(out, "out");
   CHECK(make_dir(out) == 0);
   const char *names[] = {"first.bin", "second.bin", "third.bin"};
-  for(unsigned int i = 0; i < 3 && i < a.entries.size(); i++){
+  for(unsigned int i = 0; i < 3 && i < a.entries().size(); i++){
     char original[PATH_MAX], extracted[PATH_MAX];
-    CHECK(strcmp(archive_get_entry(&a, i)->name, names[i]) == 0);
-    CHECK(archive_extract_entry(&a, i, out) == 1);
+    CHECK(a.entries()[i].name == names[i]);
+    CHECK(a.extract(i, out) == extract_result::extracted);
     path_in(original, names[i]);
     join_path(extracted, sizeof(extracted), out, names[i]);
     CHECK(same_files(original, extracted));
   }
-  archive_free(&a);
+  a.close();
 
   stop_test_server();
 

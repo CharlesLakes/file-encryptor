@@ -55,9 +55,8 @@ int main(void){
   path_in(two, "two.bin");
 
   archive a;
-  archive_init(&a);
-  CHECK(archive_create_params(&a, crls, PASSWORD, 1, 8u << 20));
-  archive_close(&a);
+  CHECK(a.create(crls, PASSWORD, 1, 8u << 20));
+  a.close();
 
   int port = start_test_server(served);
   CHECK(port > 0);
@@ -84,13 +83,13 @@ int main(void){
   CHECK(run_upload(PASSWORD, 4, args) == 1);
   stop_test_server();
 
-  CHECK(archive_open(&a, crls, PASSWORD));
-  CHECK(a.entries.size() == 2);
-  if(a.entries.size() == 2){
-    CHECK(strcmp(archive_get_entry(&a, 0)->name, "one.bin") == 0);
-    CHECK(strcmp(archive_get_entry(&a, 1)->name, "two.bin") == 0);
+  CHECK(a.open(crls, PASSWORD));
+  CHECK(a.entries().size() == 2);
+  if(a.entries().size() == 2){
+    CHECK(a.entries()[0].name == "one.bin");
+    CHECK(a.entries()[1].name == "two.bin");
   }
-  archive_free(&a);
+  a.close();
 
   remove_temp_dir();
   return test_summary();

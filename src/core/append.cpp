@@ -67,7 +67,7 @@ static bool hash_file(int fd, uint64_t len, unsigned char *hash){
 
 bool append_prepare(archive *a, const char *path, append_upload *up){
   *up = append_upload();
-  if(a->version < 3){
+  if(a->version() < 3){
     set_status(true, "Uploads need a version 3 archive. Compact it first.");
     return false;
   }
@@ -78,7 +78,7 @@ bool append_prepare(archive *a, const char *path, append_upload *up){
   }
   /* The ciphertext does not depend on where it is stored, so it is written at
      offset 0 of the body and only the index records its final offset. */
-  if(!archive_encrypt_file(a, path, up->body_fd.get(), 0, &up->entry) || !append_rebase(a, up)){
+  if(!a->encrypt_file(path, up->body_fd.get(), 0, up->entry) || !append_rebase(a, up)){
     append_discard(up);
     return false;
   }
@@ -86,25 +86,23 @@ bool append_prepare(archive *a, const char *path, append_upload *up){
 }
 
 bool append_rebase(archive *a, append_upload *up){
-  if(archive_find_entry(a, up->entry.name) >= 0){
-    set_status(true, "There is already a file named %s in the .crls.", up->entry.name);
+  if(a->find(up->entry.name)){
+    set_status(true, "There is already a file named %s in the .crls.", up->entry.name.c_str());
     return false;
   }
   append_claim *c = &up->claim;
-  c->base = a->index_offset + a->index_length;
-  memcpy(c->index_nonce, a->index_nonce, NONCE_BYTES);
+  c->base = a->index_offset() + a->index_length();
+  memcpy(c->index_nonce, a->index_nonce().data(), NONCE_BYTES);
   up->entry.offset = c->base;
 
-  unsigned char *blob;
-  uint64_t blob_size;
-  if(!archive_build_index(a, &up->entry, &blob, &blob_size)) return false;
-  bool ok = write_at(up->body_fd.get(), blob, (size_t) blob_size, up->entry.stored) &&
-            fs_truncate(up->body_fd.get(), up->entry.stored + blob_size);
-  memcpy(up->new_nonce, blob, NONCE_BYTES);
-  free(blob);
+  heap_buffer blob;
+  if(!a->build_index(&up->entry, blob)) return false;
+  bool ok = write_at(up->body_fd.get(), blob.data(), blob.size(), up->entry.stored) &&
+            fs_truncate(up->body_fd.get(), up->entry.stored + blob.size());
+  memcpy(up->new_nonce, blob.data(), NONCE_BYTES);
 
-  c->content_length = up->entry.stored + blob_size;
-  c->index_length = blob_size;
+  c->content_length = up->entry.stored + blob.size();
+  c->index_length = blob.size();
   ok = ok && hash_file(up->body_fd.get(), c->content_length, c->body_hash);
   if(!ok){
     set_status(true, "Could not write the temporary file.");
@@ -112,16 +110,14 @@ bool append_rebase(archive *a, append_upload *up){
   }
 
   unsigned char msg[APPEND_MESSAGE_BYTES];
-  append_message(a->header_ad + 24, a->index_offset, a->index_length, c, msg);
-  crypto_sign_detached(c->signature, NULL, msg, sizeof(msg), a->sign_sk);
+  append_message(a->header_ad().data() + 24, a->index_offset(), a->index_length(), c, msg);
+  crypto_sign_detached(c->signature, NULL, msg, sizeof(msg), a->signing_key().data());
   return true;
 }
 
 void append_applied(archive *a, const append_upload *up){
-  a->entries.push_back(up->entry);
-  a->index_offset = up->claim.base + up->entry.stored;
-  a->index_length = up->claim.index_length;
-  memcpy(a->index_nonce, up->new_nonce, NONCE_BYTES);
+  a->record_append(up->entry, up->claim.base + up->entry.stored, up->claim.index_length,
+                   std::span<const unsigned char, NONCE_BYTES>(up->new_nonce));
 }
 
 void append_discard(append_upload *up){

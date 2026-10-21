@@ -211,8 +211,10 @@ platform event ──► input.cpp ──► actions.cpp ──► core/archive.
 
 All UI state lives in a single global `app` (`app_state` in `ui/ui.h`). The
 current screen is `app.screen`. Functions that can fail return `false` (or
-`-1`) after they have already set an error message with `set_status()`, so the
-caller only checks the return value.
+an error value such as `extract_result::failed`) after they have already set an
+error message with `set_status()`, so the caller only checks the return value.
+The open archive is a `crls::archive` object that owns its file and its keys,
+which are wiped when it is closed.
 
 ### The `.crls` file format
 

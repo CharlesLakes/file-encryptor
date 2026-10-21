@@ -7,9 +7,9 @@
  *
  * @section archive_overview Overview
  *
- * This module is independent of the user interface. Every function that may
- * fail returns false (or -1) and records a descriptive message in the status
- * line (see status.h) before returning.
+ * This module is independent of the user interface. Every operation that may
+ * fail returns false (or extract_result::failed) and records a descriptive
+ * message in the status line (see status.h) before returning; nothing throws.
  *
  * @section archive_format File Format (version 3)
  *
@@ -71,249 +71,283 @@
 #ifndef CORE_ARCHIVE_H
 #define CORE_ARCHIVE_H
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <limits.h>
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 #include "core/source.h"
+#include "lib/heap_buffer.h"
+#include "lib/secret.h"
 #include "lib/unique_fd.h"
 
 namespace crls{
 
-#define MAGIC           "CRLS\0\0"        /**< Magic number at the start of every archive. */
-#define MAGIC_BYTES     6                 /**< Length of the magic number. */
-#define KEY_BYTES       32                /**< Symmetric key length. */
-#define SALT_BYTES      16                /**< Argon2id salt length. */
-#define NONCE_BYTES     24                /**< XChaCha20-Poly1305 nonce length. */
-#define TAG_BYTES       16                /**< AEAD authentication tag length. */
-#define STREAM_HEADER   24                /**< Secretstream header length. */
-#define STREAM_ABYTES   17                /**< Secretstream overhead per chunk. */
-#define V2_HEADER_BYTES 64                /**< Header length of format version 2. */
-#define V2_AD_BYTES     40                /**< Associated data length of version 2. */
-#define V3_HEADER_BYTES 96                /**< Header length of format version 3. */
-#define V3_AD_BYTES     72                /**< Associated data length of version 3. */
-#define MAX_HEADER_BYTES 96               /**< Largest header of any supported version. */
-#define MAX_AD_BYTES    72                /**< Largest associated data of any version. */
-#define SIGN_PK_BYTES   32                /**< Ed25519 public key length. */
-#define SIGN_SK_BYTES   64                /**< Ed25519 secret key length. */
-#define SIGN_BYTES      64                /**< Ed25519 signature length. */
-#define KDF_CONTEXT     "CRLS_v3_"        /**< crypto_kdf context of version 3. */
-#define CHUNK           (64 * 1024)       /**< Plaintext chunk size. */
-#define MAX_NAME        255               /**< Maximum length of a stored file name. */
-#define MAX_PASSWORD    128               /**< Maximum password length. */
-#define MIN_PASSWORD    8                 /**< Minimum password length for new archives. */
-#define MAX_INDEX       (64ULL << 20)     /**< Maximum plaintext index size. */
-#define MAX_OPSLIMIT    16ULL             /**< Maximum accepted Argon2id operations limit. */
-#define MAX_MEMLIMIT    (1ULL << 30)      /**< Maximum accepted Argon2id memory limit. */
+inline constexpr char MAGIC[] = "CRLS\0\0";              /**< Magic number at the start of every archive. */
+inline constexpr std::size_t MAGIC_BYTES = 6;            /**< Length of the magic number. */
+inline constexpr std::size_t KEY_BYTES = 32;             /**< Symmetric key length. */
+inline constexpr std::size_t SALT_BYTES = 16;            /**< Argon2id salt length. */
+inline constexpr std::size_t NONCE_BYTES = 24;           /**< XChaCha20-Poly1305 nonce length. */
+inline constexpr std::size_t TAG_BYTES = 16;             /**< AEAD authentication tag length. */
+inline constexpr std::size_t STREAM_HEADER = 24;         /**< Secretstream header length. */
+inline constexpr std::size_t STREAM_ABYTES = 17;         /**< Secretstream overhead per chunk. */
+inline constexpr unsigned V2_HEADER_BYTES = 64;          /**< Header length of format version 2. */
+inline constexpr unsigned V2_AD_BYTES = 40;              /**< Associated data length of version 2. */
+inline constexpr unsigned V3_HEADER_BYTES = 96;          /**< Header length of format version 3. */
+inline constexpr unsigned V3_AD_BYTES = 72;              /**< Associated data length of version 3. */
+inline constexpr unsigned MAX_HEADER_BYTES = 96;         /**< Largest header of any supported version. */
+inline constexpr unsigned MAX_AD_BYTES = 72;             /**< Largest associated data of any version. */
+inline constexpr std::size_t SIGN_PK_BYTES = 32;         /**< Ed25519 public key length. */
+inline constexpr std::size_t SIGN_SK_BYTES = 64;         /**< Ed25519 secret key length. */
+inline constexpr std::size_t SIGN_BYTES = 64;            /**< Ed25519 signature length. */
+inline constexpr char KDF_CONTEXT[] = "CRLS_v3_";        /**< crypto_kdf context of version 3. */
+inline constexpr std::size_t CHUNK = 64 * 1024;          /**< Plaintext chunk size. */
+inline constexpr std::size_t MAX_NAME = 255;             /**< Maximum length of a stored file name. */
+inline constexpr std::size_t MAX_PASSWORD = 128;         /**< Maximum password length. */
+inline constexpr std::size_t MIN_PASSWORD = 8;           /**< Minimum password length for new archives. */
+inline constexpr uint64_t MAX_INDEX = 64ULL << 20;       /**< Maximum plaintext index size. */
+inline constexpr uint64_t MAX_OPSLIMIT = 16;             /**< Maximum accepted Argon2id operations limit. */
+inline constexpr uint64_t MAX_MEMLIMIT = 1ULL << 30;     /**< Maximum accepted Argon2id memory limit. */
 
 /**
  * @brief Metadata of a single file stored inside the archive.
  */
-typedef struct{
-  char name[MAX_NAME + 1];                     /**< File name (basename only). */
-  uint64_t size;                               /**< Plaintext size in bytes. */
-  uint64_t offset;                             /**< Archive offset of the first chunk. */
-  uint64_t stored;                             /**< Encrypted size in bytes. */
-  unsigned char stream_header[STREAM_HEADER];  /**< Secretstream header. */
-}archive_entry;
+struct archive_entry{
+  std::string name;                                          /**< File name (basename only). */
+  uint64_t size = 0;                                         /**< Plaintext size in bytes. */
+  uint64_t offset = 0;                                       /**< Archive offset of the first chunk. */
+  uint64_t stored = 0;                                       /**< Encrypted size in bytes. */
+  std::array<unsigned char, STREAM_HEADER> stream_header{};  /**< Secretstream header. */
+};
+
+/** @brief Outcome of archive::extract(). */
+enum class extract_result{
+  extracted,                 /**< The file was written. */
+  skipped,                   /**< A file with that name already exists in the folder. */
+  failed                     /**< An error occurred (the status explains it). */
+};
 
 /**
- * @brief State of a .crls archive, either open or closed.
+ * @brief A .crls archive, open or closed. Closing (or destroying) it wipes its
+ *        keys and releases its file.
  */
-typedef struct{
-  bool is_open;                                /**< True while an archive is open. */
-  bool is_remote;                              /**< True if it was opened from a URL (see remote.h). */
-  unique_fd fd;                                /**< Descriptor, held under an exclusive lock (local only). */
-  std::unique_ptr<byte_source> src;            /**< Where every read comes from (empty when closed). */
-  char path[PATH_MAX];                         /**< Absolute path or URL of the archive. */
-  std::vector<archive_entry> entries;          /**< Entries in index order. */
-  unsigned char key[KEY_BYTES];                /**< Derived encryption key. */
-  unsigned char sign_sk[SIGN_SK_BYTES];        /**< Ed25519 secret key (version 3 only). */
-  int version;                                 /**< Format version of the open archive. */
-  unsigned int header_bytes;                   /**< Header length of that version. */
-  unsigned int ad_len;                         /**< Header bytes used as associated data. */
-  unsigned int pointer_pos;                    /**< Offset of the index offset and length. */
-  unsigned char header_ad[MAX_AD_BYTES];       /**< Associated data (start of the header). */
-  uint64_t index_offset, index_length;         /**< Location of the current index. */
-  unsigned char index_nonce[NONCE_BYTES];      /**< Nonce of the current index; identifies its state. */
-}archive;
+class archive{
+public:
+  archive() = default;
+  ~archive(){ close(); }
+
+  archive(const archive &) = delete;
+  archive& operator=(const archive &) = delete;
+
+  /**
+   * @brief  Opens an existing local archive and decrypts its index.
+   * @param  path     Path of the .crls file.
+   * @param  password Password used to derive the key.
+   * @return True on success, false otherwise.
+   */
+  [[nodiscard]] bool open(const std::string &path, const char *password);
+
+  /**
+   * @brief  Opens an archive from a byte source (used for URLs, see remote.h).
+   *         Files are added to it with signed uploads (see append.h).
+   * @param  src      Source of the bytes, owned by the archive from now on.
+   * @param  name     Name or URL of the archive, kept as its path.
+   * @param  password Password used to derive the key.
+   * @return True on success, false otherwise.
+   */
+  [[nodiscard]] bool open_source(std::unique_ptr<byte_source> src, const std::string &name, const char *password);
+
+  /**
+   * @brief  Reads the header and the index again with the keys already derived,
+   *         after the archive changed (e.g. another client uploaded a file).
+   * @return True on success, false otherwise.
+   */
+  [[nodiscard]] bool reload();
+
+  /**
+   * @brief  Creates a new, empty archive with libsodium's "moderate" Argon2id
+   *         limits. Fails if path already exists.
+   * @param  path     Path of the new .crls file.
+   * @param  password Password used to derive the key.
+   * @return True on success, false otherwise.
+   */
+  [[nodiscard]] bool create(const std::string &path, const char *password);
+
+  /**
+   * @brief  Same as create() with explicit Argon2id limits. Low limits are only
+   *         meant for tests.
+   * @param  path     Path of the new .crls file.
+   * @param  password Password used to derive the key.
+   * @param  ops      Argon2id operations limit (1 to MAX_OPSLIMIT).
+   * @param  mem      Argon2id memory limit in bytes (8192 to MAX_MEMLIMIT).
+   * @return True on success, false otherwise.
+   */
+  [[nodiscard]] bool create(const std::string &path, const char *password, uint64_t ops, uint64_t mem);
+
+  /**
+   * @brief Closes the archive, releases its file and wipes its keys. The object
+   *        can be opened again afterwards.
+   */
+  void close();
+
+  /** @brief True while an archive is open. */
+  bool is_open() const noexcept{ return open_; }
+
+  /** @brief True if it was opened from a URL (see remote.h). */
+  bool is_remote() const noexcept{ return remote_; }
+
+  /** @brief Format version of the open archive. */
+  int version() const noexcept{ return version_; }
+
+  /** @brief Header length of that version. */
+  unsigned header_bytes() const noexcept{ return header_bytes_; }
+
+  /** @brief Absolute path or URL of the archive. */
+  const std::string& path() const noexcept{ return path_; }
+
+  /** @brief Entries in index order. */
+  const std::vector<archive_entry>& entries() const noexcept{ return entries_; }
+
+  /**
+   * @brief  Looks up an entry by name.
+   * @param  name File name.
+   * @return Its index, or std::nullopt.
+   */
+  std::optional<std::size_t> find(std::string_view name) const;
+
+  /** @brief Total plaintext size of all stored files. */
+  uint64_t total_size() const;
+
+  /** @brief Space occupied by deleted files and superseded indexes. */
+  uint64_t wasted_space() const;
+
+  /** @brief Offset of the current index. */
+  uint64_t index_offset() const noexcept{ return index_offset_; }
+
+  /** @brief Length of the current index. */
+  uint64_t index_length() const noexcept{ return index_length_; }
+
+  /** @brief Nonce of the current index; identifies the state of the archive. */
+  std::span<const unsigned char, NONCE_BYTES> index_nonce() const noexcept{ return index_nonce_; }
+
+  /** @brief The authenticated start of the header (salt at offset 24, public key at 40). */
+  std::span<const unsigned char> header_ad() const noexcept{ return {header_ad_.data(), ad_len_}; }
+
+  /** @brief The byte source the archive is read from, or nullptr when closed. */
+  byte_source* source() noexcept{ return src_.get(); }
+
+  /** @brief Ed25519 secret key derived from the password (version 3), used to sign uploads. */
+  std::span<unsigned char, SIGN_SK_BYTES> signing_key() noexcept{ return sign_sk_.span(); }
+
+  /**
+   * @brief  Encrypts the file at path and appends it, named after its basename.
+   * @param  path Path of the file to add.
+   * @return True on success, false otherwise.
+   */
+  [[nodiscard]] bool add_file(const std::string &path);
+
+  /**
+   * @brief  Removes an entry from the index. Its data remains as unused space
+   *         until compact() is called.
+   * @param  index Position of the entry.
+   * @return True on success, false otherwise.
+   */
+  [[nodiscard]] bool remove(std::size_t index);
+
+  /**
+   * @brief  Rewrites the archive keeping only live files. In version 3 the
+   *         encrypted chunks are copied as they are, without being decrypted; a
+   *         version 2 archive is re-encrypted and converted to version 3.
+   * @return True on success, false otherwise.
+   */
+  [[nodiscard]] bool compact();
+
+  /**
+   * @brief  Decrypts an entry into dir. Existing files are never overwritten.
+   * @param  index Position of the entry.
+   * @param  dir   Destination directory.
+   * @return Whether the file was extracted, skipped or not written.
+   */
+  extract_result extract(std::size_t index, const std::string &dir);
+
+  /**
+   * @brief  Encrypts the file at path as a new entry named after its basename and
+   *         writes its chunks to fd starting at position. The entry is not added
+   *         to the index. Used by add_file() and by uploads (append.h).
+   * @param  path     Path of the file to encrypt.
+   * @param  fd       Destination file descriptor.
+   * @param  position Destination offset, which becomes the offset of the entry.
+   * @param  e        Output: the new entry.
+   * @return True on success, false otherwise (fd may hold partial data).
+   */
+  [[nodiscard]] bool encrypt_file(const std::string &path, int fd, uint64_t position, archive_entry &e);
+
+  /**
+   * @brief  Encrypts the current index, optionally with one extra entry at the
+   *         end, without writing it anywhere.
+   * @param  extra Entry appended to the index, or nullptr.
+   * @param  blob  Output: nonce followed by the ciphertext.
+   * @return True on success, false otherwise.
+   */
+  [[nodiscard]] bool build_index(const archive_entry *extra, heap_buffer &blob);
+
+  /**
+   * @brief Records an entry that was appended elsewhere (an accepted upload),
+   *        so that the archive matches the copy on the server.
+   * @param e            The new entry.
+   * @param index_offset Offset of the new index.
+   * @param index_length Length of the new index.
+   * @param nonce        Nonce of the new index.
+   */
+  void record_append(const archive_entry &e, uint64_t index_offset, uint64_t index_length,
+                     std::span<const unsigned char, NONCE_BYTES> nonce);
+
+private:
+  void set_layout(int version);
+  [[nodiscard]] bool derive_keys(const char *password, const unsigned char *header, unsigned char *pk);
+  void derive_v3_keys(const unsigned char *master, unsigned char *pk);
+  [[nodiscard]] bool load(const std::string &name, const char *password);
+  [[nodiscard]] bool parse_index(const unsigned char *p, uint64_t size, uint64_t total_size);
+  [[nodiscard]] bool write_index(int fd);
+  void remember_path(const std::string &path);
+
+  bool open_ = false;                                    /**< True while an archive is open. */
+  bool remote_ = false;                                  /**< True if opened from a URL. */
+  unique_fd fd_;                                         /**< Descriptor under an exclusive lock (local only). */
+  std::unique_ptr<byte_source> src_;                     /**< Where every read comes from. */
+  std::string path_;                                     /**< Absolute path or URL. */
+  std::vector<archive_entry> entries_;                   /**< Entries in index order. */
+  secret<KEY_BYTES> key_;                                /**< Derived encryption key. */
+  secret<SIGN_SK_BYTES> sign_sk_;                        /**< Ed25519 secret key (version 3 only). */
+  int version_ = 0;                                      /**< Format version. */
+  unsigned header_bytes_ = 0;                            /**< Header length of that version. */
+  unsigned ad_len_ = 0;                                  /**< Header bytes used as associated data. */
+  unsigned pointer_pos_ = 0;                             /**< Offset of the index offset and length. */
+  std::array<unsigned char, MAX_AD_BYTES> header_ad_{};  /**< Associated data (start of the header). */
+  uint64_t index_offset_ = 0;                            /**< Offset of the current index. */
+  uint64_t index_length_ = 0;                            /**< Length of the current index. */
+  std::array<unsigned char, NONCE_BYTES> index_nonce_{}; /**< Nonce of the current index. */
+
+};
 
 /**
- * @brief  Initializes libsodium and verifies that the sizes declared above
- *         match those reported by the library. Must be called once at startup.
+ * @brief  Initializes libsodium and verifies that the sizes declared in
+ *         deps/sodium.h match those reported by the library. Must be called
+ *         once at startup.
  * @return True on success, false otherwise.
  */
-bool           archive_crypto_init(void);
-
-/**
- * @brief Initializes an archive structure. Must be called before first use.
- * @param a Archive.
- */
-void           archive_init(archive *a);
-
-/**
- * @brief Closes the archive, releases its file descriptor and wipes the key.
- *        The structure may be reused afterwards.
- * @param a Archive.
- */
-void           archive_close(archive *a);
-
-/**
- * @brief Closes the archive and releases all memory it owns.
- * @param a Archive.
- */
-void           archive_free(archive *a);
-
-/**
- * @brief  Opens an existing archive and decrypts its index.
- * @param  a        Archive.
- * @param  path     Path of the .crls file.
- * @param  password Password used to derive the key.
- * @return True on success, false otherwise.
- */
-bool           archive_open(archive *a, const char *path, const char *password);
-
-/**
- * @brief  Opens an archive from a byte source (used for URLs, see remote.h).
- *         The archive is read-only through this module: files are added with
- *         signed uploads instead.
- * @param  a        Closed archive.
- * @param  src      Source of the bytes, owned by the archive from now on.
- * @param  name     Name or URL of the archive, kept in a->path.
- * @param  password Password used to derive the key.
- * @return True on success, false otherwise.
- */
-bool           archive_open_source(archive *a, std::unique_ptr<byte_source> src, const char *name, const char *password);
-
-/**
- * @brief  Reads the header and the index again with the keys already derived,
- *         after the archive changed (e.g. another client uploaded a file).
- * @param  a Open archive.
- * @return True on success, false otherwise.
- */
-bool           archive_reload(archive *a);
-
-/**
- * @brief  Creates a new, empty archive. Fails if path already exists.
- * @param  a        Archive.
- * @param  path     Path of the new .crls file.
- * @param  password Password used to derive the key.
- * @return True on success, false otherwise.
- */
-bool           archive_create(archive *a, const char *path, const char *password);
-
-/**
- * @brief  Same as archive_create() with explicit Argon2id limits. Low limits
- *         are only meant for tests.
- * @param  a        Archive.
- * @param  path     Path of the new .crls file.
- * @param  password Password used to derive the key.
- * @param  ops      Argon2id operations limit (1 to MAX_OPSLIMIT).
- * @param  mem      Argon2id memory limit in bytes (8192 to MAX_MEMLIMIT).
- * @return True on success, false otherwise.
- */
-bool           archive_create_params(archive *a, const char *path, const char *password,
-                                     uint64_t ops, uint64_t mem);
-
-/**
- * @brief  Returns the entry at index. No bounds checking is performed.
- * @param  a     Archive.
- * @param  index Position of the entry, 0 <= index < a->entries.size().
- * @return Pointer to the entry.
- */
-archive_entry* archive_get_entry(archive *a, unsigned int index);
-
-/**
- * @brief  Looks up an entry by name.
- * @param  a    Archive.
- * @param  name File name.
- * @return Index of the entry, or -1 if not found.
- */
-int            archive_find_entry(archive *a, const char *name);
-
-/**
- * @brief  Computes the total plaintext size of all stored files.
- * @param  a Archive.
- * @return Size in bytes.
- */
-uint64_t       archive_total_size(archive *a);
-
-/**
- * @brief  Computes the space occupied by deleted files and superseded indexes.
- * @param  a Archive.
- * @return Unused space in bytes.
- */
-uint64_t       archive_wasted_space(archive *a);
-
-/**
- * @brief  Encrypts the file at path and appends it to the archive under its
- *         basename.
- * @param  a    Archive.
- * @param  path Path of the file to add.
- * @return True on success, false otherwise.
- */
-bool           archive_add_file(archive *a, const char *path);
-
-/**
- * @brief  Encrypts the file at path as a new entry named after its basename and
- *         writes its chunks to fd starting at position. The entry is not added
- *         to the index. Used by archive_add_file() and by uploads (append.h).
- * @param  a        Open archive (its key is used).
- * @param  path     Path of the file to encrypt.
- * @param  fd       Destination file descriptor.
- * @param  position Destination offset, which becomes the offset of the entry.
- * @param  e        Output: the new entry.
- * @return True on success, false otherwise (fd may hold partial data).
- */
-bool           archive_encrypt_file(archive *a, const char *path, int fd, uint64_t position, archive_entry *e);
-
-/**
- * @brief  Encrypts the current index, optionally with one extra entry at the
- *         end, without writing it anywhere.
- * @param  a         Open archive.
- * @param  extra     Entry appended to the index, or NULL.
- * @param  blob      Output: nonce followed by the ciphertext (free with free()).
- * @param  blob_size Output: length of blob.
- * @return True on success, false otherwise.
- */
-bool           archive_build_index(archive *a, const archive_entry *extra, unsigned char **blob, uint64_t *blob_size);
-
-/**
- * @brief  Removes the entry at index from the index. Its data remains as
- *         unused space until archive_compact() is called.
- * @param  a     Archive.
- * @param  index Position of the entry.
- * @return True on success, false otherwise.
- */
-bool           archive_delete_entry(archive *a, unsigned int index);
-
-/**
- * @brief  Rewrites the archive keeping only live files. In version 3 the
- *         encrypted chunks are copied as they are, without being decrypted; a
- *         version 2 archive is re-encrypted and converted to version 3.
- * @param  a Archive.
- * @return True on success, false otherwise.
- */
-bool           archive_compact(archive *a);
-
-/**
- * @brief  Decrypts the entry at index into dir. Existing files are never
- *         overwritten.
- * @param  a     Archive.
- * @param  index Position of the entry.
- * @param  dir   Destination directory.
- * @return 1 if the file was extracted, 0 if a file with the same name already
- *         exists in dir, -1 on error.
- */
-int            archive_extract_entry(archive *a, unsigned int index, const char *dir);
+bool archive_crypto_init();
 
 /**
  * @brief  Checks whether name ends with the ".crls" extension.
  * @param  name File name.
  * @return True if the extension matches, false otherwise.
  */
-bool           has_crls_ext(const char *name);
+bool has_crls_ext(std::string_view name);
 
 }
 

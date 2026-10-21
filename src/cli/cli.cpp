@@ -30,12 +30,10 @@ int cli_upload(int argc, char **argv){
   }
 
   archive a;
-  archive_init(&a);
   bool opened = remote_open(&a, argv[1], password);
   sodium_memzero(password, sizeof(password));
   if(!opened){
     fprintf(stderr, "%s\n", status_text);
-    archive_free(&a);
     return 1;
   }
 
@@ -45,7 +43,6 @@ int cli_upload(int argc, char **argv){
     fprintf(stderr, "%s: %s\n", argv[i], status_text);
     if(!ok) failed++;
   }
-  archive_free(&a);
   return failed ? 1 : 0;
 }
 

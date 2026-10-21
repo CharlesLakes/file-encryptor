@@ -106,11 +106,11 @@ static void draw_list(void){
     else if(r % 2) fill(x, row_y, w, ROW_H, COLOR_ROW_ALT);
 
     if(app.screen == SCREEN_ARCHIVE){
-      archive_entry *e = archive_get_entry(&app.arc, (unsigned int) i);
+      const archive_entry &e = app.arc.entries()[i];
       char size_text[32];
-      format_size(e->size, size_text, sizeof(size_text));
+      format_size(e.size, size_text, sizeof(size_text));
       int size_w = text_width(FONT_REGULAR, size_text);
-      draw_text_fit(FONT_REGULAR, x + 12, row_y + text_y, w - size_w - 48, e->name, false, COLOR_TEXT);
+      draw_text_fit(FONT_REGULAR, x + 12, row_y + text_y, w - size_w - 48, e.name.c_str(), false, COLOR_TEXT);
       draw_text(FONT_REGULAR, x + w - size_w - 20, row_y + text_y, size_text, COLOR_MUTED);
     }else{
       dir_item *item = browser_get_item(&app.files, (unsigned int) i);
@@ -206,15 +206,15 @@ static void draw_open_screen(void){
  */
 static void draw_archive_screen(void){
   archive *a = &app.arc;
-  draw_text_fit(FONT_TITLE, MARGIN, 34, platform_width() - 2*MARGIN, fs_basename(a->path), false, COLOR_TEXT);
-  draw_text_fit(FONT_REGULAR, MARGIN, 58, platform_width() - 2*MARGIN, a->path, true, COLOR_MUTED);
+  draw_text_fit(FONT_TITLE, MARGIN, 34, platform_width() - 2*MARGIN, fs_basename(a->path().c_str()), false, COLOR_TEXT);
+  draw_text_fit(FONT_REGULAR, MARGIN, 58, platform_width() - 2*MARGIN, a->path().c_str(), true, COLOR_MUTED);
 
-  uint64_t wasted = archive_wasted_space(a);
+  uint64_t wasted = a->wasted_space();
   char size_text[32], wasted_text[32], line[160];
-  format_size(archive_total_size(a), size_text, sizeof(size_text));
+  format_size(a->total_size(), size_text, sizeof(size_text));
   format_size(wasted, wasted_text, sizeof(wasted_text));
-  snprintf(line, sizeof(line), "%zu file%s, %s", a->entries.size(), a->entries.size() == 1 ? "" : "s", size_text);
-  if(a->is_remote) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  remote: Add uploads");
+  snprintf(line, sizeof(line), "%zu file%s, %s", a->entries().size(), a->entries().size() == 1 ? "" : "s", size_text);
+  if(a->is_remote()) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  remote: Add uploads");
   else if(wasted) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  %s unused (Compact)", wasted_text);
   draw_text(FONT_REGULAR, MARGIN, 80, line, COLOR_MUTED);
   draw_list();

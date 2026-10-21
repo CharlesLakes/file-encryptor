@@ -15,18 +15,22 @@ namespace crls{
 app_state app;
 
 void app_init(void){
-  app = app_state();
+  app.arc.close();
   app.screen = SCREEN_OPEN;
+  app.extract_all = false;
   app.entry_sel = -1;
+  app.entry_scroll = 0;
   app.confirm_delete = -1;
+  app.path_field[0] = '\0';
+  clear_secrets();
   app.focus = FIELD_PATH;
+  app.last_click_time = 0;
   app.last_click_index = -1;
-  archive_init(&app.arc);
   browser_init(&app.files);
 }
 
 void app_free(void){
-  archive_free(&app.arc);
+  app.arc.close();
   browser_free(&app.files);
   clear_secrets();
 }
@@ -54,7 +58,7 @@ void list_rect(int *x, int *y, int *w, int *h){
 }
 
 int list_count(void){
-  return (int) (app.screen == SCREEN_ARCHIVE ? app.arc.entries.size() : app.files.items.size());
+  return (int) (app.screen == SCREEN_ARCHIVE ? app.arc.entries().size() : app.files.items.size());
 }
 
 int* list_sel(void){
@@ -111,7 +115,7 @@ int get_buttons(button *b){
     const char *label = layouts[app.screen][i].label;
     int action = layouts[app.screen][i].action;
     /* A remote archive only grows by uploads: deleting and compacting happen on the server. */
-    if(app.screen == SCREEN_ARCHIVE && app.arc.is_remote && (action == ACT_DELETE || action == ACT_COMPACT)) continue;
+    if(app.screen == SCREEN_ARCHIVE && app.arc.is_remote() && (action == ACT_DELETE || action == ACT_COMPACT)) continue;
     b[count].label = label;
     b[count].action = layouts[app.screen][i].action;
     b[count].color = layouts[app.screen][i].color;
