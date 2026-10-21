@@ -355,16 +355,16 @@ void platform_draw_rect(int x, int y, int w, int h, unsigned long color){
   DeleteObject(brush);
 }
 
-void platform_draw_text(ui_font font, int x, int baseline, const char *s, int len, unsigned long color){
+void platform_draw_text(ui_font font, int x, int baseline, std::string_view s, unsigned long color){
   SelectObject(w32.buffer, w32.font(font));
   SetTextColor(w32.buffer, to_colorref(color));
-  TextOutA(w32.buffer, x, baseline, s, len);
+  TextOutA(w32.buffer, x, baseline, s.data(), static_cast<int>(s.size()));
 }
 
-int platform_text_width(ui_font font, const char *s, int len){
+int platform_text_width(ui_font font, std::string_view s){
   SIZE size;
   SelectObject(w32.buffer, w32.font(font));
-  return GetTextExtentPoint32A(w32.buffer, s, len, &size) ? size.cx : 0;
+  return GetTextExtentPoint32A(w32.buffer, s.data(), static_cast<int>(s.size()), &size) ? size.cx : 0;
 }
 
 int platform_font_ascent(ui_font font){

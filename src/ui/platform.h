@@ -24,6 +24,7 @@
 #ifndef UI_PLATFORM_H
 #define UI_PLATFORM_H
 
+#include <string_view>
 #include "lib/function_ref.h"
 
 namespace crls{
@@ -136,24 +137,22 @@ void platform_fill_rect(int x, int y, int w, int h, unsigned long color);
 void platform_draw_rect(int x, int y, int w, int h, unsigned long color);
 
 /**
- * @brief Draws len characters of s.
+ * @brief Draws a string.
  * @param font     Font.
  * @param x        Left coordinate.
  * @param baseline Baseline coordinate.
- * @param s        String.
- * @param len      Number of characters.
+ * @param s        String (it need not be NUL-terminated).
  * @param color    Text color.
  */
-void platform_draw_text(ui_font font, int x, int baseline, const char *s, int len, unsigned long color);
+void platform_draw_text(ui_font font, int x, int baseline, std::string_view s, unsigned long color);
 
 /**
- * @brief  Measures the width of len characters of s.
+ * @brief  Measures the width of a string.
  * @param  font Font.
- * @param  s    String.
- * @param  len  Number of characters.
+ * @param  s    String (it need not be NUL-terminated).
  * @return Width in pixels.
  */
-int  platform_text_width(ui_font font, const char *s, int len);
+int  platform_text_width(ui_font font, std::string_view s);
 
 /**
  * @brief  Returns the distance from the baseline to the top of the font.

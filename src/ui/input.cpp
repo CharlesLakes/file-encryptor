@@ -8,7 +8,7 @@
 
 #include "ui/ui.h"
 
-#include <string.h>
+#include <algorithm>
 #include "core/fs.h"
 
 namespace crls{
@@ -16,59 +16,42 @@ namespace crls{
 /** @brief Maximum interval between the clicks of a double click, in milliseconds. */
 inline constexpr unsigned long DOUBLE_CLICK_MS = 400;
 
-/**
- * @brief  Checks whether a point lies inside a rectangle.
- * @param  px Point x coordinate.
- * @param  py Point y coordinate.
- * @param  x  Rectangle left coordinate.
- * @param  y  Rectangle top coordinate.
- * @param  w  Rectangle width.
- * @param  h  Rectangle height.
- * @return True if the point is inside, false otherwise.
- */
-static bool inside(int px, int py, int x, int y, int w, int h){
-  return px >= x && px < x + w && py >= y && py < y + h;
-}
+void handle_click(app_state &app, const ui_event &event){
+  int px = event.x, py = event.y;
+  rect list = list_rect(app);
 
-void handle_click(app_state &app, const ui_event *event){
-  int px = event->x, py = event->y;
-  int lx, ly, lw, lh;
-  list_rect(app, &lx, &ly, &lw, &lh);
-
-  if(event->type == ui_event_type::wheel){
-    if(inside(px, py, lx, ly, lw, lh)){
-      *list_scroll(app) += 3 * event->wheel;
+  if(event.type == ui_event_type::wheel){
+    if(list.contains(px, py)){
+      list_scroll(app) += 3 * event.wheel;
       clamp_scroll(app);
     }
     return;
   }
 
-  button b[MAX_BUTTONS];
-  int count = get_buttons(app, b);
-  for(int i = 0; i < count; i++)
-    if(inside(px, py, b[i].x, b[i].y, b[i].w, b[i].h)){
-      handle_action(app, b[i].action);
-      return;
-    }
+  button_row row = get_buttons(app);
+  std::span<const button> buttons = row.list();
+  auto hit = std::ranges::find_if(buttons, [&](const button &b){ return b.area.contains(px, py); });
+  if(hit != buttons.end()){
+    handle_action(app, hit->action);
+    return;
+  }
 
-  if(app.screen == ui_screen::open)
-    for(int i = 0; i < UI_FIELD_COUNT; i++){
-      ui_field field = static_cast<ui_field>(i);
-      int fx, fy, fw, fh;
-      field_rect(field, &fx, &fy, &fw, &fh);
-      if(inside(px, py, fx, fy, fw, fh)){
+  if(app.screen == ui_screen::open){
+    for(ui_field field : UI_FIELDS){
+      if(field_rect(field).contains(px, py)){
         app.focus = field;
         return;
       }
     }
+  }
 
-  if(inside(px, py, lx, ly, lw, lh)){
-    int index = *list_scroll(app) + (py - ly) / ROW_H;
+  if(list.contains(px, py)){
+    int index = list_scroll(app) + (py - list.y) / ROW_H;
     if(index >= list_count(app)) return;
 
-    bool double_click = index == app.last_click_index && event->time - app.last_click_time < DOUBLE_CLICK_MS;
+    bool double_click = index == app.last_click_index && event.time - app.last_click_time < DOUBLE_CLICK_MS;
     app.last_click_index = index;
-    app.last_click_time = event->time;
+    app.last_click_time = event.time;
 
     select_row(app, index);
     if(double_click){
@@ -80,7 +63,7 @@ void handle_click(app_state &app, const ui_event *event){
 
 /**
  * @brief Appends a character to the focused field, or deletes its last character.
- * @param app Application state.
+ * @param app   Application state.
  * @param c     Character to append.
  * @param erase True to delete the last character instead.
  */
@@ -95,8 +78,20 @@ static void edit_field(app_state &app, char c, bool erase){
   else field.push_back(c);
 }
 
-void handle_key(app_state &app, const ui_event *event){
-  ui_key key = event->key;
+/**
+ * @brief  Returns the field that follows (or precedes) another in focus order,
+ *         wrapping around.
+ * @param  field Current field.
+ * @param  step  1 for the next field, -1 for the previous one.
+ * @return The new field.
+ */
+static ui_field cycle_field(ui_field field, int step){
+  int count = static_cast<int>(UI_FIELDS.size());
+  return UI_FIELDS[static_cast<std::size_t>((static_cast<int>(field) + step + count) % count)];
+}
+
+void handle_key(app_state &app, const ui_event &event){
+  ui_key key = event.key;
 
   switch(key){
     case ui_key::up:        move_selection(app, -1); return;
@@ -110,15 +105,11 @@ void handle_key(app_state &app, const ui_event *event){
   }
 
   if(app.screen == ui_screen::open){
-    int focus = static_cast<int>(app.focus);
-    if(key == ui_key::tab){ app.focus = static_cast<ui_field>((focus + 1) % UI_FIELD_COUNT); return; }
-    if(key == ui_key::back_tab){ app.focus = static_cast<ui_field>((focus + UI_FIELD_COUNT - 1) % UI_FIELD_COUNT); return; }
-    if(key == ui_key::enter){
-      handle_action(app, app.focus == ui_field::confirm ? ui_action::create : ui_action::open);
-      return;
-    }
-    if(key == ui_key::backspace){ edit_field(app, 0, true); return; }
-    if(key == ui_key::character) edit_field(app, event->ch, false);
+    if(key == ui_key::tab) app.focus = cycle_field(app.focus, 1);
+    else if(key == ui_key::back_tab) app.focus = cycle_field(app.focus, -1);
+    else if(key == ui_key::enter) handle_action(app, app.focus == ui_field::confirm ? ui_action::create : ui_action::open);
+    else if(key == ui_key::backspace) edit_field(app, 0, true);
+    else if(key == ui_key::character) edit_field(app, event.ch, false);
     return;
   }
 

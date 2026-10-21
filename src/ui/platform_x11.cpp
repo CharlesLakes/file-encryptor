@@ -236,14 +236,14 @@ void platform_draw_rect(int x, int y, int w, int h, unsigned long color){
   XDrawRectangle(x11.dpy, x11.buffer, x11.gc, x, y, static_cast<unsigned int>(w) - 1, static_cast<unsigned int>(h) - 1);
 }
 
-void platform_draw_text(ui_font font, int x, int baseline, const char *s, int len, unsigned long color){
+void platform_draw_text(ui_font font, int x, int baseline, std::string_view s, unsigned long color){
   XSetForeground(x11.dpy, x11.gc, color);
   XSetFont(x11.dpy, x11.gc, x11.font(font)->fid);
-  XDrawString(x11.dpy, x11.buffer, x11.gc, x, baseline, s, len);
+  XDrawString(x11.dpy, x11.buffer, x11.gc, x, baseline, s.data(), static_cast<int>(s.size()));
 }
 
-int platform_text_width(ui_font font, const char *s, int len){
-  return XTextWidth(x11.font(font), s, len);
+int platform_text_width(ui_font font, std::string_view s){
+  return XTextWidth(x11.font(font), s.data(), static_cast<int>(s.size()));
 }
 
 int platform_font_ascent(ui_font font){

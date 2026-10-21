@@ -8,13 +8,11 @@
 
 #include "ui/ui.h"
 
-#include <stdio.h>
-#include <string.h>
+#include <algorithm>
 #include "core/fs.h"
 #include "core/remote.h"
 #include "core/status.h"
 #include "core/util.h"
-#include "deps/sodium.h"
 
 namespace crls{
 
@@ -58,8 +56,8 @@ static void go_to(app_state &app, ui_screen new_screen, browser_filter filter){
  */
 static void on_browser_select(app_state &app){
   if(app.screen != ui_screen::open || app.files.sel < 0) return;
-  const dir_item *item = &app.files.items()[app.files.sel];
-  if(!item->is_dir) app.path_field = join_path(app.files.dir(), item->name);
+  const dir_item &item = app.files.items()[static_cast<std::size_t>(app.files.sel)];
+  if(!item.is_dir) app.path_field = join_path(app.files.dir(), item.name);
 }
 
 /* ---------------- Actions ---------------- */
@@ -87,11 +85,11 @@ static void open_archive(app_state &app){
   if(remote ? !remote_open(app.arc, path, app.password_field.c_str())
             : !app.arc.open(path, app.password_field.c_str())) return;
   clear_secrets(app);
-  unsigned int n = app.arc.entries().size();
+  std::size_t n = app.arc.entries().size();
   app.entry_sel = n ? 0 : -1;
   app.entry_scroll = 0;
   go_to(app, ui_screen::archive, app.files.filter);
-  set_status(false, "Archive opened: %u file%s.", n, n == 1 ? "" : "s");
+  set_status(false, "Archive opened: %zu file%s.", n, n == 1 ? "" : "s");
 }
 
 /**
@@ -144,12 +142,12 @@ static void create_archive(app_state &app){
  * @param app Application state.
  */
 static void extract_to_current_dir(app_state &app){
-  unsigned int from = app.extract_all ? 0 : (unsigned int) app.entry_sel;
-  unsigned int to = app.extract_all ? app.arc.entries().size() : (unsigned int) app.entry_sel + 1;
+  std::size_t from = app.extract_all ? 0 : static_cast<std::size_t>(app.entry_sel);
+  std::size_t to = app.extract_all ? app.arc.entries().size() : from + 1;
   int done = 0, skipped = 0, failed = 0;
 
-  for(unsigned int i = from; i < to; i++){
-    extract_result result = app.arc.extract(i, app.files.dir().c_str());
+  for(std::size_t i = from; i < to; i++){
+    extract_result result = app.arc.extract(i, app.files.dir());
     if(result == extract_result::extracted) done++;
     else if(result == extract_result::skipped) skipped++;
     else failed++;
@@ -172,11 +170,11 @@ static void delete_selected(app_state &app){
   }else if(app.confirm_delete != app.entry_sel){
     app.confirm_delete = app.entry_sel;
     set_status(true, "Press Delete again to remove %s from the .crls.",
-               app.arc.entries()[app.entry_sel].name.c_str());
+               app.arc.entries()[static_cast<std::size_t>(app.entry_sel)].name.c_str());
   }else{
     app.confirm_delete = -1;
-    if(app.arc.remove((unsigned int) app.entry_sel)){
-      if(app.entry_sel >= (int) app.arc.entries().size()) app.entry_sel = (int) app.arc.entries().size() - 1;
+    if(app.arc.remove(static_cast<std::size_t>(app.entry_sel))){
+      app.entry_sel = std::min(app.entry_sel, static_cast<int>(app.arc.entries().size()) - 1);
       clamp_scroll(app);
     }
   }
@@ -220,17 +218,17 @@ static void pick_confirm(app_state &app){
     set_status(true, "Select a file.");
     return;
   }
-  const dir_item *item = &app.files.items()[app.files.sel];
-  if(item->is_dir){
-    app.files.enter(item->name);
+  const dir_item &item = app.files.items()[static_cast<std::size_t>(app.files.sel)];
+  if(item.is_dir){
+    app.files.enter(item.name);
     return;
   }
-  std::string path = join_path(app.files.dir(), item->name);
+  std::string path = join_path(app.files.dir(), item.name);
   bool remote = app.arc.is_remote();
-  set_status(false, remote ? "Encrypting and uploading %s..." : "Adding %s...", item->name.c_str());
+  set_status(false, remote ? "Encrypting and uploading %s..." : "Adding %s...", item.name.c_str());
   draw(app);
   if(remote ? remote_add_file(app.arc, path) : app.arc.add_file(path)){
-    app.entry_sel = (int) app.arc.entries().size() - 1;
+    app.entry_sel = static_cast<int>(app.arc.entries().size()) - 1;
     app.screen = ui_screen::archive;
     ensure_visible(app);
   }
@@ -258,7 +256,7 @@ void handle_action(app_state &app, ui_action action){
         set_status(true, "Select the file you want to extract.");
         break;
       }
-      if(app.arc.entries().size() == 0){
+      if(app.arc.entries().empty()){
         set_status(true, "There are no files to extract.");
         break;
       }
@@ -290,7 +288,7 @@ void handle_action(app_state &app, ui_action action){
 /* ---------------- List selection ---------------- */
 
 void activate_selection(app_state &app){
-  int sel = *list_sel(app);
+  int sel = list_sel(app);
   if(sel < 0) return;
 
   if(app.screen == ui_screen::archive){
@@ -298,9 +296,9 @@ void activate_selection(app_state &app){
     return;
   }
 
-  const dir_item *item = &app.files.items()[sel];
-  if(item->is_dir){
-    app.files.enter(item->name);
+  const dir_item &item = app.files.items()[static_cast<std::size_t>(sel)];
+  if(item.is_dir){
+    app.files.enter(item.name);
   }else if(app.screen == ui_screen::open){
     on_browser_select(app);
     app.focus = ui_field::password;
@@ -312,18 +310,17 @@ void activate_selection(app_state &app){
 void move_selection(app_state &app, int delta){
   int count = list_count(app);
   if(count == 0) return;
-  int *sel = list_sel(app);
-  *sel += delta;
-  if(*sel < 0) *sel = 0;
-  if(*sel >= count) *sel = count - 1;
+  int &sel = list_sel(app);
+  sel = std::clamp(sel + delta, 0, count - 1);
   app.confirm_delete = -1;
   ensure_visible(app);
   on_browser_select(app);
 }
 
 void select_row(app_state &app, int index){
-  if(*list_sel(app) != index) app.confirm_delete = -1;
-  *list_sel(app) = index;
+  int &sel = list_sel(app);
+  if(sel != index) app.confirm_delete = -1;
+  sel = index;
   on_browser_select(app);
 }
 

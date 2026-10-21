@@ -1,6 +1,6 @@
 /**
  * @file    layout.cpp
- * @brief   Application state, list geometry and the buttons of each screen.
+ * @brief   List geometry, text fields and the buttons of each screen.
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
@@ -8,102 +8,120 @@
 
 #include "ui/ui.h"
 
-#include <string.h>
+#include <algorithm>
 
 namespace crls{
 
 /* ---------------- Anchors ---------------- */
 
-int buttons_y(void){
+int buttons_y(){
   return platform_height() - BUTTONS_BOTTOM;
 }
 
-int status_y(void){
+int status_y(){
   return platform_height() - STATUS_BOTTOM;
 }
 
 /* ---------------- List ---------------- */
 
-void list_rect(app_state &app, int *x, int *y, int *w, int *h){
-  *x = MARGIN;
-  *w = platform_width() - 2*MARGIN;
-  *y = app.screen == ui_screen::archive ? 92 : 72;
+rect list_rect(const app_state &app){
+  rect r;
+  r.x = MARGIN;
+  r.w = platform_width() - 2*MARGIN;
+  r.y = app.screen == ui_screen::archive ? 92 : 72;
   int bottom = (app.screen == ui_screen::open ? buttons_y() - FIELDS_ABOVE : buttons_y()) - 16;
-  /* Whole rows only. */
-  *h = (bottom - *y) / ROW_H * ROW_H;
-  if(*h < ROW_H) *h = ROW_H;
+  /* Whole rows only, and at least one. */
+  r.h = std::max((bottom - r.y) / ROW_H * ROW_H, ROW_H);
+  return r;
 }
 
-int list_count(app_state &app){
-  return (int) (app.screen == ui_screen::archive ? app.arc.entries().size() : app.files.items().size());
+int list_count(const app_state &app){
+  return static_cast<int>(app.screen == ui_screen::archive ? app.arc.entries().size() : app.files.items().size());
 }
 
-int* list_sel(app_state &app){
-  return app.screen == ui_screen::archive ? &app.entry_sel : &app.files.sel;
+int& list_sel(app_state &app){
+  return app.screen == ui_screen::archive ? app.entry_sel : app.files.sel;
 }
 
-int* list_scroll(app_state &app){
-  return app.screen == ui_screen::archive ? &app.entry_scroll : &app.files.scroll;
+int& list_scroll(app_state &app){
+  return app.screen == ui_screen::archive ? app.entry_scroll : app.files.scroll;
 }
 
-int visible_rows(app_state &app){
-  int x, y, w, h;
-  list_rect(app, &x, &y, &w, &h);
-  return h / ROW_H;
+int visible_rows(const app_state &app){
+  return list_rect(app).h / ROW_H;
 }
 
 void clamp_scroll(app_state &app){
-  int *scroll = list_scroll(app);
-  int max_scroll = list_count(app) - visible_rows(app);
-  if(*scroll > max_scroll) *scroll = max_scroll;
-  if(*scroll < 0) *scroll = 0;
+  int &scroll = list_scroll(app);
+  /* Not std::clamp: the upper bound is negative when every row fits. */
+  scroll = std::max(0, std::min(scroll, list_count(app) - visible_rows(app)));
 }
 
 void ensure_visible(app_state &app){
-  int sel = *list_sel(app), *scroll = list_scroll(app);
+  int sel = list_sel(app), &scroll = list_scroll(app);
   if(sel < 0) return;
-  if(sel < *scroll) *scroll = sel;
-  if(sel >= *scroll + visible_rows(app)) *scroll = sel - visible_rows(app) + 1;
+  if(sel < scroll) scroll = sel;
+  if(sel >= scroll + visible_rows(app)) scroll = sel - visible_rows(app) + 1;
   clamp_scroll(app);
 }
 
 /* ---------------- Fields and buttons ---------------- */
 
-void field_rect(ui_field field, int *x, int *y, int *w, int *h){
-  *x = FIELD_X;
-  *y = buttons_y() - FIELDS_ABOVE + static_cast<int>(field) * FIELD_STEP;
-  *w = platform_width() - MARGIN - FIELD_X;
-  *h = FIELD_H;
+rect field_rect(ui_field field){
+  return rect{FIELD_X, buttons_y() - FIELDS_ABOVE + static_cast<int>(field) * FIELD_STEP,
+              platform_width() - MARGIN - FIELD_X, FIELD_H};
 }
 
-int get_buttons(app_state &app, button *b){
-  /* One row per screen, in ui_screen order. */
-  static const struct{ const char *label; ui_action action; unsigned long color; } layouts[4][MAX_BUTTONS] = {
-    {{"Open", ui_action::open, COLOR_PRIMARY}, {"Create new", ui_action::create, COLOR_BUTTON}},
-    {{"Add", ui_action::add, COLOR_PRIMARY}, {"Extract", ui_action::extract, COLOR_BUTTON},
-     {"Extract all", ui_action::extract_all, COLOR_BUTTON}, {"Delete", ui_action::remove, COLOR_DANGER},
-     {"Compact", ui_action::compact, COLOR_BUTTON}, {"Close", ui_action::close, COLOR_BUTTON}},
-    {{"Add", ui_action::pick_confirm, COLOR_PRIMARY}, {"Cancel", ui_action::pick_cancel, COLOR_BUTTON}},
-    {{"Extract here", ui_action::pick_confirm, COLOR_PRIMARY}, {"Cancel", ui_action::pick_cancel, COLOR_BUTTON}},
-  };
+/** @brief A button of a screen, before it is laid out. */
+struct button_spec{
+  std::string_view label;    /**< Displayed text. */
+  ui_action action;          /**< Action triggered on click. */
+  unsigned long color;       /**< Background color. */
+};
 
-  int count = 0, x = MARGIN;
-  for(int i = 0; i < MAX_BUTTONS && layouts[static_cast<int>(app.screen)][i].label; i++){
-    const char *label = layouts[static_cast<int>(app.screen)][i].label;
-    ui_action action = layouts[static_cast<int>(app.screen)][i].action;
-    /* A remote archive only grows by uploads: deleting and compacting happen on the server. */
-    if(app.screen == ui_screen::archive && app.arc.is_remote() && (action == ui_action::remove || action == ui_action::compact)) continue;
-    b[count].label = label;
-    b[count].action = layouts[static_cast<int>(app.screen)][i].action;
-    b[count].color = layouts[static_cast<int>(app.screen)][i].color;
-    b[count].x = x;
-    b[count].y = buttons_y();
-    b[count].w = platform_text_width(ui_font::bold, label, (int) strlen(label)) + 36;
-    b[count].h = BUTTON_H;
-    x += b[count].w + 10;
-    count++;
+static constexpr std::array<button_spec, 2> OPEN_BUTTONS = {{
+  {"Open", ui_action::open, COLOR_PRIMARY}, {"Create new", ui_action::create, COLOR_BUTTON},
+}};
+static constexpr std::array<button_spec, 6> ARCHIVE_BUTTONS = {{
+  {"Add", ui_action::add, COLOR_PRIMARY}, {"Extract", ui_action::extract, COLOR_BUTTON},
+  {"Extract all", ui_action::extract_all, COLOR_BUTTON}, {"Delete", ui_action::remove, COLOR_DANGER},
+  {"Compact", ui_action::compact, COLOR_BUTTON}, {"Close", ui_action::close, COLOR_BUTTON},
+}};
+static constexpr std::array<button_spec, 2> PICK_ADD_BUTTONS = {{
+  {"Add", ui_action::pick_confirm, COLOR_PRIMARY}, {"Cancel", ui_action::pick_cancel, COLOR_BUTTON},
+}};
+static constexpr std::array<button_spec, 2> PICK_EXTRACT_BUTTONS = {{
+  {"Extract here", ui_action::pick_confirm, COLOR_PRIMARY}, {"Cancel", ui_action::pick_cancel, COLOR_BUTTON},
+}};
+
+/**
+ * @brief  Returns the buttons of a screen.
+ * @param  screen Screen.
+ * @return Its buttons, left to right.
+ */
+static std::span<const button_spec> screen_buttons(ui_screen screen){
+  switch(screen){
+    case ui_screen::open:         return OPEN_BUTTONS;
+    case ui_screen::archive:      return ARCHIVE_BUTTONS;
+    case ui_screen::pick_add:     return PICK_ADD_BUTTONS;
+    case ui_screen::pick_extract: return PICK_EXTRACT_BUTTONS;
   }
-  return count;
+  return {};
+}
+
+button_row get_buttons(const app_state &app){
+  static_assert(ARCHIVE_BUTTONS.size() <= MAX_BUTTONS, "a screen has more buttons than MAX_BUTTONS");
+  button_row row;
+  int x = MARGIN;
+  for(const button_spec &spec : screen_buttons(app.screen)){
+    /* A remote archive only grows by uploads: deleting and compacting happen on the server. */
+    bool server_only = spec.action == ui_action::remove || spec.action == ui_action::compact;
+    if(app.screen == ui_screen::archive && app.arc.is_remote() && server_only) continue;
+    int w = platform_text_width(ui_font::bold, spec.label) + 36;
+    row.slots[row.count++] = button{rect{x, buttons_y(), w, BUTTON_H}, spec.label, spec.action, spec.color};
+    x += w + 10;
+  }
+  return row;
 }
 
 }

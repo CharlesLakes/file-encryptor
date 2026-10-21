@@ -26,7 +26,7 @@
  *
  * | File             | Responsibility                                     |
  * |------------------|----------------------------------------------------|
- * | layout.cpp       | Initial state, list geometry and buttons           |
+ * | layout.cpp       | List geometry, text fields and buttons             |
  * | draw.cpp         | Painting of each screen                            |
  * | actions.cpp      | Behavior of each button and key                    |
  * | input.cpp        | Mouse and keyboard handling                        |
@@ -39,7 +39,10 @@
 #ifndef UI_UI_H
 #define UI_UI_H
 
+#include <array>
+#include <span>
 #include <string>
+#include <string_view>
 #include "core/archive.h"
 #include "core/browser.h"
 #include "lib/secret.h"
@@ -66,7 +69,7 @@ inline constexpr int FIELDS_ABOVE   = 118;   /**< Distance from the first field 
 inline constexpr int FIELD_STEP     = 36;   /**< Vertical distance between fields. */
 inline constexpr int FIELD_X        = 190;
 inline constexpr int FIELD_H        = 28;
-inline constexpr int MAX_BUTTONS    = 6;
+inline constexpr std::size_t MAX_BUTTONS = 6;
 inline constexpr std::size_t MAX_PATH_FIELD = 4096;   /**< Longest text accepted in the path field. */
 
 /* ---------------- Colors (0xRRGGBB) ---------------- */
@@ -101,16 +104,46 @@ enum class ui_action{
 /** @brief Text fields of ui_screen::open, in focus order. */
 enum class ui_field{ path, password, confirm };
 
-inline constexpr int UI_FIELD_COUNT = 3;   /**< Number of ui_field values. */
+/** @brief Every ui_field, in focus order. */
+inline constexpr std::array<ui_field, 3> UI_FIELDS = {ui_field::path, ui_field::password, ui_field::confirm};
+
+/**
+ * @brief A rectangle in window coordinates.
+ */
+struct rect{
+  int x = 0, y = 0;              /**< Top left corner. */
+  int w = 0, h = 0;              /**< Size. */
+
+  /**
+   * @brief  Checks whether a point lies inside the rectangle.
+   * @param  px Point x coordinate.
+   * @param  py Point y coordinate.
+   * @return True if the point is inside.
+   */
+  constexpr bool contains(int px, int py) const noexcept{
+    return px >= x && px < x + w && py >= y && py < y + h;
+  }
+};
 
 /**
  * @brief Button drawn on the current screen.
  */
 struct button{
-  int x, y, w, h;                /**< Bounding rectangle. */
-  const char *label;             /**< Displayed text. */
-  ui_action action;              /**< Action triggered on click. */
-  unsigned long color;           /**< Background color. */
+  rect area;                     /**< Bounding rectangle. */
+  std::string_view label;        /**< Displayed text (a string literal). */
+  ui_action action = ui_action::none; /**< Action triggered on click. */
+  unsigned long color = 0;       /**< Background color. */
+};
+
+/**
+ * @brief The buttons of the current screen, left to right.
+ */
+struct button_row{
+  std::array<button, MAX_BUTTONS> slots{}; /**< Storage; only the first count are used. */
+  std::size_t count = 0;                   /**< Number of buttons. */
+
+  /** @brief The buttons. */
+  std::span<const button> list() const noexcept{ return std::span(slots).first(count); }
 };
 
 /**
@@ -145,24 +178,21 @@ struct app_state{
  * @brief  Returns the top coordinate of the button row.
  * @return Y coordinate in pixels.
  */
-int  buttons_y(void);
+int  buttons_y();
 
 /**
  * @brief  Returns the baseline of the status line.
  * @return Y coordinate in pixels.
  */
-int  status_y(void);
+int  status_y();
 
 /**
- * @brief Computes the rectangle of the list on the current screen, which
- *        fills the space between the header and the fields or buttons.
- * @param app Application state.
- * @param x Output: left coordinate.
- * @param y Output: top coordinate.
- * @param w Output: width.
- * @param h Output: height.
+ * @brief  Computes the rectangle of the list on the current screen, which
+ *         fills the space between the header and the fields or buttons.
+ * @param  app Application state.
+ * @return The rectangle.
  */
-void list_rect(app_state &app, int *x, int *y, int *w, int *h);
+rect list_rect(const app_state &app);
 
 /**
  * @brief  Returns the number of rows of the current list (archive entries or
@@ -170,28 +200,28 @@ void list_rect(app_state &app, int *x, int *y, int *w, int *h);
  * @param app Application state.
  * @return Number of rows.
  */
-int  list_count(app_state &app);
+int  list_count(const app_state &app);
 
 /**
- * @brief  Returns a pointer to the selected row of the current list.
- * @param app Application state.
- * @return Pointer to the selection index (-1 = none).
+ * @brief  Returns the selected row of the current list.
+ * @param  app Application state.
+ * @return The selection index (-1 = none), which may be changed.
  */
-int* list_sel(app_state &app);
+int& list_sel(app_state &app);
 
 /**
- * @brief  Returns a pointer to the scroll position of the current list.
- * @param app Application state.
- * @return Pointer to the index of the first visible row.
+ * @brief  Returns the scroll position of the current list.
+ * @param  app Application state.
+ * @return The index of the first visible row, which may be changed.
  */
-int* list_scroll(app_state &app);
+int& list_scroll(app_state &app);
 
 /**
  * @brief  Returns the number of rows that fit in the current list.
  * @param app Application state.
  * @return Number of visible rows.
  */
-int  visible_rows(app_state &app);
+int  visible_rows(const app_state &app);
 
 /**
  * @brief Restricts the scroll position of the current list to its valid range.
@@ -206,22 +236,18 @@ void clamp_scroll(app_state &app);
 void ensure_visible(app_state &app);
 
 /**
- * @brief Computes the rectangle of a text field on ui_screen::open.
- * @param field Field.
- * @param x     Output: left coordinate.
- * @param y     Output: top coordinate.
- * @param w     Output: width.
- * @param h     Output: height.
+ * @brief  Computes the rectangle of a text field on ui_screen::open.
+ * @param  field Field.
+ * @return The rectangle.
  */
-void field_rect(ui_field field, int *x, int *y, int *w, int *h);
+rect field_rect(ui_field field);
 
 /**
- * @brief  Fills b with the buttons of the current screen.
+ * @brief  Lays out the buttons of the current screen.
  * @param  app Application state.
- * @param  b Destination array with room for at least MAX_BUTTONS elements.
- * @return Number of buttons written.
+ * @return The buttons.
  */
-int  get_buttons(app_state &app, button *b);
+button_row get_buttons(const app_state &app);
 
 /* ---------------- draw.cpp ---------------- */
 
@@ -273,14 +299,14 @@ void clear_secrets(app_state &app);
  * @param app Application state.
  * @param event ui_event_type::click or ui_event_type::wheel event.
  */
-void handle_click(app_state &app, const ui_event *event);
+void handle_click(app_state &app, const ui_event &event);
 
 /**
  * @brief Handles a key press.
  * @param app Application state.
  * @param event ui_event_type::key event.
  */
-void handle_key(app_state &app, const ui_event *event);
+void handle_key(app_state &app, const ui_event &event);
 
 }
 

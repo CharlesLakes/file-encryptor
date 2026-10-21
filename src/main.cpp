@@ -92,8 +92,8 @@ int main(int argc, char **argv){
     ui_event event;
     platform_next_event(&event);
 
-    if(event.type == ui_event_type::click || event.type == ui_event_type::wheel) handle_click(app, &event);
-    else if(event.type == ui_event_type::key) handle_key(app, &event);
+    if(event.type == ui_event_type::click || event.type == ui_event_type::wheel) handle_click(app, event);
+    else if(event.type == ui_event_type::key) handle_key(app, event);
     else if(event.type == ui_event_type::quit) running = false;
 
     if(event.type == ui_event_type::resize) redraw(app);
