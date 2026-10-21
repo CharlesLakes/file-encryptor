@@ -159,7 +159,7 @@ src/
     tty_posix.cpp     ... termios
     tty_win32.cpp     ... console mode
   ui/                 GUI
-    ui.h              shared state (app), constants, all UI prototypes
+    ui.h              app_state, constants, all UI prototypes
     platform.h        window, events, drawing and fonts, independent of the OS
     platform_x11.cpp  ... implemented with Xlib
     platform_win32.cpp ... implemented with Win32/GDI
@@ -209,8 +209,9 @@ platform event ──► input.cpp ──► actions.cpp ──► core/archive.
                                             draw.cpp repaints the whole window
 ```
 
-All UI state lives in a single global `app` (`app_state` in `ui/ui.h`). The
-current screen is `app.screen`. Functions that can fail return `false` (or
+All UI state lives in one `app_state` object (`ui/ui.h`), created in `main()`
+and passed by reference to every UI function. The current screen is
+`app.screen`. Functions that can fail return `false` (or
 an error value such as `extract_result::failed`) after they have already set an
 error message with `set_status()`, so the caller only checks the return value.
 The open archive is a `crls::archive` object that owns its file and its keys,

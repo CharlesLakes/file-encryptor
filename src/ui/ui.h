@@ -24,13 +24,16 @@
  *
  * @section ui_files Source Files
  *
- * | File      | Responsibility                                          |
- * |-----------|---------------------------------------------------------|
- * | layout.c  | Application state (app), list geometry and buttons      |
- * | draw.c    | Painting of each screen                                 |
- * | actions.c | Behavior of each button and key                         |
- * | input.c   | Mouse and keyboard handling                             |
- * | platform_*.c | Window, events and drawing for each windowing system |
+ * | File             | Responsibility                                     |
+ * |------------------|----------------------------------------------------|
+ * | layout.cpp       | Initial state, list geometry and buttons           |
+ * | draw.cpp         | Painting of each screen                            |
+ * | actions.cpp      | Behavior of each button and key                    |
+ * | input.cpp        | Mouse and keyboard handling                        |
+ * | platform_*.cpp   | Window, events and drawing for each window system  |
+ *
+ * The state is one app_state object owned by main() and passed by reference
+ * to every function that needs it; there are no UI globals.
  */
 
 #ifndef UI_UI_H
@@ -130,19 +133,20 @@ typedef struct{
   int last_click_index;          /**< Row of the last click, for double-click detection. */
 }app_state;
 
-extern app_state app;            /**< Global application state (layout.c). */
 
 /* ---------------- layout.c ---------------- */
 
 /**
  * @brief Initializes the application state on ui_screen::open.
+ * @param app Application state.
  */
-void app_init(void);
+void app_init(app_state &app);
 
 /**
  * @brief Releases the application state and wipes the password fields.
+ * @param app Application state.
  */
-void app_free(void);
+void app_free(app_state &app);
 
 /**
  * @brief  Returns the top coordinate of the button row.
@@ -159,47 +163,54 @@ int  status_y(void);
 /**
  * @brief Computes the rectangle of the list on the current screen, which
  *        fills the space between the header and the fields or buttons.
+ * @param app Application state.
  * @param x Output: left coordinate.
  * @param y Output: top coordinate.
  * @param w Output: width.
  * @param h Output: height.
  */
-void list_rect(int *x, int *y, int *w, int *h);
+void list_rect(app_state &app, int *x, int *y, int *w, int *h);
 
 /**
  * @brief  Returns the number of rows of the current list (archive entries or
  *         browser items).
+ * @param app Application state.
  * @return Number of rows.
  */
-int  list_count(void);
+int  list_count(app_state &app);
 
 /**
  * @brief  Returns a pointer to the selected row of the current list.
+ * @param app Application state.
  * @return Pointer to the selection index (-1 = none).
  */
-int* list_sel(void);
+int* list_sel(app_state &app);
 
 /**
  * @brief  Returns a pointer to the scroll position of the current list.
+ * @param app Application state.
  * @return Pointer to the index of the first visible row.
  */
-int* list_scroll(void);
+int* list_scroll(app_state &app);
 
 /**
  * @brief  Returns the number of rows that fit in the current list.
+ * @param app Application state.
  * @return Number of visible rows.
  */
-int  visible_rows(void);
+int  visible_rows(app_state &app);
 
 /**
  * @brief Restricts the scroll position of the current list to its valid range.
+ * @param app Application state.
  */
-void clamp_scroll(void);
+void clamp_scroll(app_state &app);
 
 /**
  * @brief Adjusts the scroll position so that the selected row is visible.
+ * @param app Application state.
  */
-void ensure_visible(void);
+void ensure_visible(app_state &app);
 
 /**
  * @brief Computes the rectangle of a text field on ui_screen::open.
@@ -213,61 +224,70 @@ void field_rect(ui_field field, int *x, int *y, int *w, int *h);
 
 /**
  * @brief  Fills b with the buttons of the current screen.
+ * @param  app Application state.
  * @param  b Destination array with room for at least MAX_BUTTONS elements.
  * @return Number of buttons written.
  */
-int  get_buttons(button *b);
+int  get_buttons(app_state &app, button *b);
 
 /* ---------------- draw.c ---------------- */
 
 /**
  * @brief Repaints the whole window.
+ * @param app Application state.
  */
-void draw(void);
+void draw(app_state &app);
 
 /* ---------------- actions.c ---------------- */
 
 /**
  * @brief Executes an action.
+ * @param app Application state.
  * @param action Action.
  */
-void handle_action(ui_action action);
+void handle_action(app_state &app, ui_action action);
 
 /**
  * @brief Activates the selected row (Enter key or double click).
+ * @param app Application state.
  */
-void activate_selection(void);
+void activate_selection(app_state &app);
 
 /**
  * @brief Moves the selection of the current list, clamped to its bounds.
+ * @param app Application state.
  * @param delta Number of rows to move (negative moves up).
  */
-void move_selection(int delta);
+void move_selection(app_state &app, int delta);
 
 /**
  * @brief Selects a row of the current list.
+ * @param app Application state.
  * @param index Row to select.
  */
-void select_row(int index);
+void select_row(app_state &app, int index);
 
 /**
  * @brief Wipes the password and confirmation fields.
+ * @param app Application state.
  */
-void clear_secrets(void);
+void clear_secrets(app_state &app);
 
 /* ---------------- input.c ---------------- */
 
 /**
  * @brief Handles a mouse click or wheel event.
+ * @param app Application state.
  * @param event ui_event_type::click or ui_event_type::wheel event.
  */
-void handle_click(const ui_event *event);
+void handle_click(app_state &app, const ui_event *event);
 
 /**
  * @brief Handles a key press.
+ * @param app Application state.
  * @param event ui_event_type::key event.
  */
-void handle_key(const ui_event *event);
+void handle_key(app_state &app, const ui_event *event);
 
 }
 

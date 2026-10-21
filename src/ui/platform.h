@@ -24,7 +24,7 @@
 #ifndef UI_PLATFORM_H
 #define UI_PLATFORM_H
 
-#include <stdbool.h>
+#include "lib/function_ref.h"
 
 namespace crls{
 
@@ -81,9 +81,10 @@ bool platform_open(int width, int height, const char *title, unsigned long backg
  * (Win32 runs its own message loop then); they call redraw directly so that
  * the contents follow the new size.
  *
- * @param redraw Function that repaints the whole window.
+ * @param redraw Function that repaints the whole window; it must stay alive
+ *               until platform_set_redraw({}) is called or the window closes.
  */
-void platform_set_redraw(void (*redraw)(void));
+void platform_set_redraw(function_ref<void()> redraw);
 
 /**
  * @brief  Returns the current width of the client area and the buffer.

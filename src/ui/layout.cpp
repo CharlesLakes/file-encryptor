@@ -12,9 +12,7 @@
 
 namespace crls{
 
-app_state app;
-
-void app_init(void){
+void app_init(app_state &app){
   app.arc.close();
   app.screen = ui_screen::open;
   app.extract_all = false;
@@ -22,16 +20,16 @@ void app_init(void){
   app.entry_scroll = 0;
   app.confirm_delete = -1;
   app.path_field[0] = '\0';
-  clear_secrets();
+  clear_secrets(app);
   app.focus = ui_field::path;
   app.last_click_time = 0;
   app.last_click_index = -1;
   app.files.open_cwd();
 }
 
-void app_free(void){
+void app_free(app_state &app){
   app.arc.close();
-  clear_secrets();
+  clear_secrets(app);
 }
 
 /* ---------------- Anchors ---------------- */
@@ -46,7 +44,7 @@ int status_y(void){
 
 /* ---------------- List ---------------- */
 
-void list_rect(int *x, int *y, int *w, int *h){
+void list_rect(app_state &app, int *x, int *y, int *w, int *h){
   *x = MARGIN;
   *w = platform_width() - 2*MARGIN;
   *y = app.screen == ui_screen::archive ? 92 : 72;
@@ -56,37 +54,37 @@ void list_rect(int *x, int *y, int *w, int *h){
   if(*h < ROW_H) *h = ROW_H;
 }
 
-int list_count(void){
+int list_count(app_state &app){
   return (int) (app.screen == ui_screen::archive ? app.arc.entries().size() : app.files.items().size());
 }
 
-int* list_sel(void){
+int* list_sel(app_state &app){
   return app.screen == ui_screen::archive ? &app.entry_sel : &app.files.sel;
 }
 
-int* list_scroll(void){
+int* list_scroll(app_state &app){
   return app.screen == ui_screen::archive ? &app.entry_scroll : &app.files.scroll;
 }
 
-int visible_rows(void){
+int visible_rows(app_state &app){
   int x, y, w, h;
-  list_rect(&x, &y, &w, &h);
+  list_rect(app, &x, &y, &w, &h);
   return h / ROW_H;
 }
 
-void clamp_scroll(void){
-  int *scroll = list_scroll();
-  int max_scroll = list_count() - visible_rows();
+void clamp_scroll(app_state &app){
+  int *scroll = list_scroll(app);
+  int max_scroll = list_count(app) - visible_rows(app);
   if(*scroll > max_scroll) *scroll = max_scroll;
   if(*scroll < 0) *scroll = 0;
 }
 
-void ensure_visible(void){
-  int sel = *list_sel(), *scroll = list_scroll();
+void ensure_visible(app_state &app){
+  int sel = *list_sel(app), *scroll = list_scroll(app);
   if(sel < 0) return;
   if(sel < *scroll) *scroll = sel;
-  if(sel >= *scroll + visible_rows()) *scroll = sel - visible_rows() + 1;
-  clamp_scroll();
+  if(sel >= *scroll + visible_rows(app)) *scroll = sel - visible_rows(app) + 1;
+  clamp_scroll(app);
 }
 
 /* ---------------- Fields and buttons ---------------- */
@@ -98,7 +96,7 @@ void field_rect(ui_field field, int *x, int *y, int *w, int *h){
   *h = FIELD_H;
 }
 
-int get_buttons(button *b){
+int get_buttons(app_state &app, button *b){
   /* One row per screen, in ui_screen order. */
   static const struct{ const char *label; ui_action action; unsigned long color; } layouts[4][MAX_BUTTONS] = {
     {{"Open", ui_action::open, COLOR_PRIMARY}, {"Create new", ui_action::create, COLOR_BUTTON}},

@@ -29,24 +29,24 @@ static bool inside(int px, int py, int x, int y, int w, int h){
   return px >= x && px < x + w && py >= y && py < y + h;
 }
 
-void handle_click(const ui_event *event){
+void handle_click(app_state &app, const ui_event *event){
   int px = event->x, py = event->y;
   int lx, ly, lw, lh;
-  list_rect(&lx, &ly, &lw, &lh);
+  list_rect(app, &lx, &ly, &lw, &lh);
 
   if(event->type == ui_event_type::wheel){
     if(inside(px, py, lx, ly, lw, lh)){
-      *list_scroll() += 3 * event->wheel;
-      clamp_scroll();
+      *list_scroll(app) += 3 * event->wheel;
+      clamp_scroll(app);
     }
     return;
   }
 
   button b[MAX_BUTTONS];
-  int count = get_buttons(b);
+  int count = get_buttons(app, b);
   for(int i = 0; i < count; i++)
     if(inside(px, py, b[i].x, b[i].y, b[i].w, b[i].h)){
-      handle_action(b[i].action);
+      handle_action(app, b[i].action);
       return;
     }
 
@@ -62,27 +62,28 @@ void handle_click(const ui_event *event){
     }
 
   if(inside(px, py, lx, ly, lw, lh)){
-    int index = *list_scroll() + (py - ly) / ROW_H;
-    if(index >= list_count()) return;
+    int index = *list_scroll(app) + (py - ly) / ROW_H;
+    if(index >= list_count(app)) return;
 
     bool double_click = index == app.last_click_index && event->time - app.last_click_time < DOUBLE_CLICK_MS;
     app.last_click_index = index;
     app.last_click_time = event->time;
 
-    select_row(index);
+    select_row(app, index);
     if(double_click){
       app.last_click_index = -1;
-      activate_selection();
+      activate_selection(app);
     }
   }
 }
 
 /**
  * @brief Appends a character to the focused field, or deletes its last character.
+ * @param app Application state.
  * @param c     Character to append.
  * @param erase True to delete the last character instead.
  */
-static void edit_field(char c, bool erase){
+static void edit_field(app_state &app, char c, bool erase){
   char *field = app.focus == ui_field::path ? app.path_field
               : app.focus == ui_field::password ? app.password_field : app.confirm_field;
   size_t max = app.focus == ui_field::path ? sizeof(app.path_field) - 1 : MAX_PASSWORD;
@@ -95,16 +96,16 @@ static void edit_field(char c, bool erase){
   }
 }
 
-void handle_key(const ui_event *event){
+void handle_key(app_state &app, const ui_event *event){
   ui_key key = event->key;
 
   switch(key){
-    case ui_key::up:        move_selection(-1); return;
-    case ui_key::down:      move_selection(1); return;
-    case ui_key::page_up:   move_selection(-visible_rows()); return;
-    case ui_key::page_down: move_selection(visible_rows()); return;
-    case ui_key::home:      move_selection(-list_count()); return;
-    case ui_key::end:       move_selection(list_count()); return;
+    case ui_key::up:        move_selection(app, -1); return;
+    case ui_key::down:      move_selection(app, 1); return;
+    case ui_key::page_up:   move_selection(app, -visible_rows(app)); return;
+    case ui_key::page_down: move_selection(app, visible_rows(app)); return;
+    case ui_key::home:      move_selection(app, -list_count(app)); return;
+    case ui_key::end:       move_selection(app, list_count(app)); return;
     /* The other keys depend on the screen and are handled below. */
     default:                break;
   }
@@ -114,22 +115,22 @@ void handle_key(const ui_event *event){
     if(key == ui_key::tab){ app.focus = static_cast<ui_field>((focus + 1) % UI_FIELD_COUNT); return; }
     if(key == ui_key::back_tab){ app.focus = static_cast<ui_field>((focus + UI_FIELD_COUNT - 1) % UI_FIELD_COUNT); return; }
     if(key == ui_key::enter){
-      handle_action(app.focus == ui_field::confirm ? ui_action::create : ui_action::open);
+      handle_action(app, app.focus == ui_field::confirm ? ui_action::create : ui_action::open);
       return;
     }
-    if(key == ui_key::backspace){ edit_field(0, true); return; }
-    if(key == ui_key::character) edit_field(event->ch, false);
+    if(key == ui_key::backspace){ edit_field(app, 0, true); return; }
+    if(key == ui_key::character) edit_field(app, event->ch, false);
     return;
   }
 
   if(key == ui_key::enter){
-    activate_selection();
+    activate_selection(app);
   }else if(key == ui_key::escape && app.screen != ui_screen::archive){
-    handle_action(ui_action::pick_cancel);
+    handle_action(app, ui_action::pick_cancel);
   }else if(key == ui_key::backspace && app.screen != ui_screen::archive && !fs_is_root(app.files.dir().c_str())){
     app.files.enter("..");
   }else if(key == ui_key::del && app.screen == ui_screen::archive){
-    handle_action(ui_action::remove);
+    handle_action(app, ui_action::remove);
   }
 }
 

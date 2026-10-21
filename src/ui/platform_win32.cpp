@@ -38,7 +38,7 @@ struct win32_state{
   HGDIOBJ old_bitmap = NULL;                 /**< Bitmap originally selected into buffer. */
   int width = 0, height = 0;                 /**< Size of the client area and the buffer. */
   int min_width = 0, min_height = 0;         /**< Minimum size of the client area. */
-  void (*redraw)() = nullptr;                /**< Repaints the window during a resize. */
+  function_ref<void()> redraw;               /**< Repaints the window during a resize. */
   HFONT fonts[UI_FONT_COUNT] = {};           /**< Loaded fonts, indexed by ui_font. */
   TEXTMETRICA metrics[UI_FONT_COUNT] = {};   /**< Metrics of each font. */
   ui_event pending;                          /**< Event waiting to be returned. */
@@ -306,7 +306,7 @@ bool platform_open(int width, int height, const char *title, unsigned long backg
   return true;
 }
 
-void platform_set_redraw(void (*redraw)()){
+void platform_set_redraw(function_ref<void()> redraw){
   w32.redraw = redraw;
 }
 

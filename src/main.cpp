@@ -31,11 +31,12 @@ using namespace crls;
 /**
  * @brief Adapts the scroll of the current list to the new number of visible
  *        rows and repaints the window.
+ * @param app Application state.
  */
-static void redraw(void){
-  clamp_scroll();
-  ensure_visible();
-  draw();
+static void redraw(app_state &app){
+  clamp_scroll(app);
+  ensure_visible(app);
+  draw(app);
 }
 
 /**
@@ -80,27 +81,31 @@ int main(int argc, char **argv){
   return 2;
 #endif
 
-  app_init();
+  /* The whole state of the GUI; it lives until the window is closed. */
+  app_state app;
+  app_init(app);
   if(!platform_open(MIN_WIDTH, MIN_HEIGHT, ".crls manager", COLOR_BG)){
-    app_free();
+    app_free(app);
     return 1;
   }
-  platform_set_redraw(redraw);
+  auto repaint = [&app]{ redraw(app); };
+  platform_set_redraw(repaint);
 
   bool running = true;
   while(running){
     ui_event event;
     platform_next_event(&event);
 
-    if(event.type == ui_event_type::click || event.type == ui_event_type::wheel) handle_click(&event);
-    else if(event.type == ui_event_type::key) handle_key(&event);
+    if(event.type == ui_event_type::click || event.type == ui_event_type::wheel) handle_click(app, &event);
+    else if(event.type == ui_event_type::key) handle_key(app, &event);
     else if(event.type == ui_event_type::quit) running = false;
 
-    if(event.type == ui_event_type::resize) redraw();
-    else if(running && event.type != ui_event_type::none) draw();
+    if(event.type == ui_event_type::resize) redraw(app);
+    else if(running && event.type != ui_event_type::none) draw(app);
   }
 
-  app_free();
+  platform_set_redraw({});
+  app_free(app);
   platform_close();
   return 0;
 }

@@ -154,7 +154,7 @@ bool platform_open(int width, int height, const char *title, unsigned long backg
   return true;
 }
 
-void platform_set_redraw(void (*redraw)()){
+void platform_set_redraw(function_ref<void()> redraw){
   /* X11 always returns events, so main() repaints after ui_event_type::resize. */
   (void) redraw;
 }

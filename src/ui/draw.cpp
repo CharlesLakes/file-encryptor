@@ -85,13 +85,14 @@ static int text_width(ui_font f, const char *s){
 
 /**
  * @brief Draws the list of the current screen with its scroll bar.
+ * @param app Application state.
  */
-static void draw_list(void){
+static void draw_list(app_state &app){
   int x, y, w, h;
-  list_rect(&x, &y, &w, &h);
+  list_rect(app, &x, &y, &w, &h);
   fill(x, y, w, h, COLOR_PANEL);
 
-  int count = list_count(), sel = *list_sel(), scroll = *list_scroll(), rows = visible_rows();
+  int count = list_count(app), sel = *list_sel(app), scroll = *list_scroll(app), rows = visible_rows(app);
   int text_y = (ROW_H + platform_font_ascent(ui_font::regular) - platform_font_descent(ui_font::regular)) / 2;
 
   if(count == 0){
@@ -131,12 +132,13 @@ static void draw_list(void){
 
 /**
  * @brief Draws a labeled text field of ui_screen::open.
+ * @param app Application state.
  * @param index  Field.
  * @param label  Label displayed to the left.
  * @param value  Field content.
  * @param secret True to mask the content with asterisks.
  */
-static void draw_field(ui_field index, const char *label, const char *value, bool secret){
+static void draw_field(app_state &app, ui_field index, const char *label, const char *value, bool secret){
   int x, y, w, h;
   field_rect(index, &x, &y, &w, &h);
   int text_y = y + (h + platform_font_ascent(ui_font::regular) - platform_font_descent(ui_font::regular)) / 2;
@@ -165,10 +167,11 @@ static void draw_field(ui_field index, const char *label, const char *value, boo
 
 /**
  * @brief Draws the buttons of the current screen.
+ * @param app Application state.
  */
-static void draw_buttons(void){
+static void draw_buttons(app_state &app){
   button b[MAX_BUTTONS];
-  int count = get_buttons(b);
+  int count = get_buttons(app, b);
   for(int i = 0; i < count; i++){
     fill(b[i].x, b[i].y, b[i].w, b[i].h, b[i].color);
     unsigned long text_color = b[i].color == COLOR_BUTTON ? COLOR_TEXT : COLOR_DARK_TEXT;
@@ -182,8 +185,9 @@ static void draw_buttons(void){
 
 /**
  * @brief Draws the path of the browsed folder below the title.
+ * @param app Application state.
  */
-static void draw_folder_line(void){
+static void draw_folder_line(app_state &app){
   char line[PATH_MAX + 16];
   snprintf(line, sizeof(line), "Folder: %s", app.files.dir().c_str());
   draw_text_fit(ui_font::regular, MARGIN, 60, platform_width() - 2*MARGIN, line, true, COLOR_MUTED);
@@ -191,20 +195,22 @@ static void draw_folder_line(void){
 
 /**
  * @brief Draws ui_screen::open.
+ * @param app Application state.
  */
-static void draw_open_screen(void){
+static void draw_open_screen(app_state &app){
   draw_text(ui_font::title, MARGIN, 34, ".crls archive manager", COLOR_TEXT);
-  draw_folder_line();
-  draw_list();
-  draw_field(ui_field::path, ".crls file or URL", app.path_field, false);
-  draw_field(ui_field::password, "Password", app.password_field, true);
-  draw_field(ui_field::confirm, "Confirm (create)", app.confirm_field, true);
+  draw_folder_line(app);
+  draw_list(app);
+  draw_field(app, ui_field::path, ".crls file or URL", app.path_field, false);
+  draw_field(app, ui_field::password, "Password", app.password_field, true);
+  draw_field(app, ui_field::confirm, "Confirm (create)", app.confirm_field, true);
 }
 
 /**
  * @brief Draws ui_screen::archive.
+ * @param app Application state.
  */
-static void draw_archive_screen(void){
+static void draw_archive_screen(app_state &app){
   archive *a = &app.arc;
   draw_text_fit(ui_font::title, MARGIN, 34, platform_width() - 2*MARGIN, fs_basename(a->path().c_str()), false, COLOR_TEXT);
   draw_text_fit(ui_font::regular, MARGIN, 58, platform_width() - 2*MARGIN, a->path().c_str(), true, COLOR_MUTED);
@@ -217,29 +223,30 @@ static void draw_archive_screen(void){
   if(a->is_remote()) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  remote: Add uploads");
   else if(wasted) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  %s unused (Compact)", wasted_text);
   draw_text(ui_font::regular, MARGIN, 80, line, COLOR_MUTED);
-  draw_list();
+  draw_list(app);
 }
 
 /**
  * @brief Draws ui_screen::pick_add and ui_screen::pick_extract.
+ * @param app Application state.
  */
-static void draw_pick_screen(void){
+static void draw_pick_screen(app_state &app){
   const char *title = app.screen == ui_screen::pick_add ? "Choose the file to add"
                     : app.extract_all ? "Choose the folder to extract everything into"
                     : "Choose the folder to extract into";
   draw_text(ui_font::title, MARGIN, 34, title, COLOR_TEXT);
-  draw_folder_line();
-  draw_list();
+  draw_folder_line(app);
+  draw_list(app);
 }
 
-void draw(void){
+void draw(app_state &app){
   fill(0, 0, platform_width(), platform_height(), COLOR_BG);
 
-  if(app.screen == ui_screen::open) draw_open_screen();
-  else if(app.screen == ui_screen::archive) draw_archive_screen();
-  else draw_pick_screen();
+  if(app.screen == ui_screen::open) draw_open_screen(app);
+  else if(app.screen == ui_screen::archive) draw_archive_screen(app);
+  else draw_pick_screen(app);
 
-  draw_buttons();
+  draw_buttons(app);
   draw_text_fit(ui_font::regular, MARGIN, status_y(), platform_width() - 2*MARGIN, status_text, false,
                 status_error ? COLOR_ERROR : COLOR_OK);
 
