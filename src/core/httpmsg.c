@@ -74,8 +74,8 @@ http_parse_result http_parse_request(const char *buf, size_t len, http_request *
 
     if(first_line){
       /* METHOD SP target SP HTTP/1.x */
-      const char *sp1 = memchr(p, ' ', line_len);
-      const char *sp2 = sp1 ? memchr(sp1 + 1, ' ', (size_t) (eol - sp1 - 1)) : NULL;
+      const char *sp1 = (const char *) memchr(p, ' ', line_len);
+      const char *sp2 = sp1 ? (const char *) memchr(sp1 + 1, ' ', (size_t) (eol - sp1 - 1)) : NULL;
       if(!sp1 || !sp2) return HTTP_PARSE_BAD;
       size_t method_len = (size_t) (sp1 - p), target_len = (size_t) (sp2 - sp1 - 1);
       size_t version_len = (size_t) (eol - sp2 - 1);
@@ -92,7 +92,7 @@ http_parse_result http_parse_request(const char *buf, size_t len, http_request *
       req->head_length = (size_t) (eol + 2 - buf);
       return HTTP_PARSE_OK;
     }else{
-      const char *colon = memchr(p, ':', line_len);
+      const char *colon = (const char *) memchr(p, ':', line_len);
       if(!colon || colon == p) return HTTP_PARSE_BAD;
       for(const char *q = p; q < colon; q++)
         if(!is_token_char(*q)) return HTTP_PARSE_BAD;

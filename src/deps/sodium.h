@@ -16,6 +16,7 @@
 #ifndef DEPS_SODIUM_H
 #define DEPS_SODIUM_H
 
+#include <stdalign.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -32,7 +33,7 @@ typedef struct{
  * @brief Opaque BLAKE2b state; its size and alignment match the official header.
  */
 typedef struct{
-  _Alignas(64) unsigned char opaque[384];
+  alignas(64) unsigned char opaque[384];
 }crypto_generichash_state;
 
 int    sodium_init(void);

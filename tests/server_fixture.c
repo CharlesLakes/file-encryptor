@@ -48,7 +48,13 @@ int start_test_server(const char *dir){
   remove(port_file);
   stop_flag = 0;
   port = 0;
-  cfg = (server_config){dir, "127.0.0.1", 0, 64ULL << 20, 5, port_file, &stop_flag};
+  cfg.dir = dir;
+  cfg.bind = "127.0.0.1";
+  cfg.port = 0;
+  cfg.max_upload = 64ULL << 20;
+  cfg.timeout = 5;
+  cfg.port_file = port_file;
+  cfg.stop = &stop_flag;
 #ifdef _WIN32
   thread = CreateThread(NULL, 0, server_thread, NULL, 0, NULL);
 #else

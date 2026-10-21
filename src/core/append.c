@@ -8,6 +8,7 @@
 
 #include "core/append.h"
 
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -36,7 +37,7 @@ void append_message(const unsigned char *salt, uint64_t index_offset, uint64_t i
   p += 16;
   memcpy(p, c->body_hash, BODY_HASH_BYTES);
   p += BODY_HASH_BYTES;
-  _Static_assert(APPEND_DOMAIN_BYTES + SALT_BYTES + 16 + NONCE_BYTES + 16 + BODY_HASH_BYTES == APPEND_MESSAGE_BYTES,
+  static_assert(APPEND_DOMAIN_BYTES + SALT_BYTES + 16 + NONCE_BYTES + 16 + BODY_HASH_BYTES == APPEND_MESSAGE_BYTES,
                  "APPEND_MESSAGE_BYTES must match the fields of the message");
 }
 

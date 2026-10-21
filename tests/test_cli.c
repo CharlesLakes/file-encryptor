@@ -61,11 +61,13 @@ int main(void){
   CHECK(port > 0);
   snprintf(url, sizeof(url), "http://127.0.0.1:%d/cli.crls", port);
 
-  char *usage[] = {"--upload", url};
+  /* argv is writable in C and C++, string literals are not. */
+  char upload[] = "--upload";
+  char *usage[] = {upload, url};
   CHECK(cli_upload(2, usage) == 2);
 
   /* The wrong password opens nothing and uploads nothing. */
-  char *args[] = {"--upload", url, one, two};
+  char *args[] = {upload, url, one, two};
   int code = run_upload("not-the-password", 4, args);
   if(strstr(status_text, "libcurl") != NULL){
     printf("SKIP: %s\n", status_text);

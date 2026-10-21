@@ -12,6 +12,7 @@
 #include "ui/platform.h"
 
 #include <stdio.h>
+#include <string.h>
 #include "deps/xlib.h"
 
 /** @brief X11 resources of the window. */
@@ -69,7 +70,8 @@ bool platform_open(int width, int height, const char *title, unsigned long backg
   XStoreName(x11.dpy, x11.win, title);
   XSelectInput(x11.dpy, x11.win, ExposureMask | KeyPressMask | ButtonPressMask | StructureNotifyMask);
 
-  XSizeHints hints = {0};
+  XSizeHints hints;
+  memset(&hints, 0, sizeof(hints));
   hints.flags = PMinSize;
   hints.min_width = width;
   hints.min_height = height;
