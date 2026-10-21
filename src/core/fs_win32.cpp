@@ -109,14 +109,16 @@ bool fs_same_file(int fd_a, int fd_b){
          a.nFileIndexHigh == b.nFileIndexHigh && a.nFileIndexLow == b.nFileIndexLow;
 }
 
-bool fs_absolute_path(const char *path, char *out){
-  if(!_fullpath(out, path, PATH_MAX) || GetFileAttributesA(out) == INVALID_FILE_ATTRIBUTES){
+bool fs_absolute_path(const std::string &path, std::string &out){
+  char full[PATH_MAX];
+  if(!_fullpath(full, path.c_str(), PATH_MAX) || GetFileAttributesA(full) == INVALID_FILE_ATTRIBUTES){
     errno = ENOENT;
     return false;
   }
   /* Drop trailing separators, except the one of a drive root such as "C:\". */
-  size_t len = strlen(out);
-  while(len > 1 && fs_is_separator(out[len - 1]) && !fs_is_root(out)) out[--len] = '\0';
+  size_t len = strlen(full);
+  while(len > 1 && fs_is_separator(full[len - 1]) && !fs_is_root(full)) full[--len] = '\0';
+  out = full;
   return true;
 }
 
@@ -124,45 +126,44 @@ bool fs_absolute_path(const char *path, char *out){
  * @brief  Opens a file for reading and writing, optionally locking it.
  * @param  path Path of the file.
  * @param  lock True to acquire the exclusive lock.
- * @return File descriptor, or -1 on error.
+ * @return The descriptor, empty on error.
  */
-static int reopen(const char *path, bool lock){
-  int fd = open(path, O_RDWR | O_BINARY);
-  if(fd >= 0 && lock) fs_lock(fd);
+static unique_fd reopen(const std::string &path, bool lock){
+  unique_fd fd(open(path.c_str(), O_RDWR | O_BINARY));
+  if(fd && lock) fs_lock(fd.get());
   return fd;
 }
 
-bool fs_replace_file(const char *from, int *from_fd, const char *to, int *to_fd){
-  close(*from_fd);
-  close(*to_fd);
-  bool moved = MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+bool fs_replace_file(const std::string &from, unique_fd &from_fd, const std::string &to, unique_fd &to_fd){
+  from_fd.reset();
+  to_fd.reset();
+  bool moved = MoveFileExA(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 
   if(!moved){
     errno = EACCES;
-    *to_fd = reopen(to, true);
-    *from_fd = reopen(from, false);
+    to_fd = reopen(to, true);
+    from_fd = reopen(from, false);
     return false;
   }
-  *from_fd = -1;
-  *to_fd = reopen(to, true);
-  return *to_fd >= 0;
+  to_fd = reopen(to, true);
+  return static_cast<bool>(to_fd);
 }
 
-int fs_open_regular(const char *path, bool write){
+unique_fd fs_open_regular(const std::string &path, bool write){
   /* FILE_SHARE_DELETE lets the GUI compact (replace) the file while it is open here. */
-  HANDLE h = CreateFileA(path, GENERIC_READ | (write ? GENERIC_WRITE : 0),
+  HANDLE h = CreateFileA(path.c_str(), GENERIC_READ | (write ? GENERIC_WRITE : 0),
                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
                          FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
-  if(h == INVALID_HANDLE_VALUE) return -1;
+  if(h == INVALID_HANDLE_VALUE) return unique_fd();
   BY_HANDLE_FILE_INFORMATION info;
   if(!GetFileInformationByHandle(h, &info) || GetFileType(h) != FILE_TYPE_DISK ||
      (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))){
     CloseHandle(h);
-    return -1;
+    return unique_fd();
   }
   int fd = _open_osfhandle((intptr_t) h, (write ? _O_RDWR : _O_RDONLY) | _O_BINARY);
   if(fd < 0) CloseHandle(h);
-  return fd;
+  return unique_fd(fd);
 }
 
 bool fs_file_id(int fd, char *out, size_t out_size){
@@ -173,11 +174,11 @@ bool fs_file_id(int fd, char *out, size_t out_size){
   return true;
 }
 
-int fs_temp_file(void){
+unique_fd fs_temp_file(){
   char dir[MAX_PATH], path[MAX_PATH];
-  if(!GetTempPathA(sizeof(dir), dir) || !GetTempFileNameA(dir, "crl", 0, path)) return -1;
+  if(!GetTempPathA(sizeof(dir), dir) || !GetTempFileNameA(dir, "crl", 0, path)) return unique_fd();
   /* _O_TEMPORARY deletes the file when the last descriptor is closed. */
-  return open(path, O_RDWR | O_TRUNC | O_BINARY | _O_TEMPORARY);
+  return unique_fd(open(path, O_RDWR | O_TRUNC | O_BINARY | _O_TEMPORARY));
 }
 
 bool fs_is_separator(char c){

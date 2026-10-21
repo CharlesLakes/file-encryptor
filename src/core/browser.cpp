@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <strings.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -90,13 +91,14 @@ void browser_load(browser *b){
 }
 
 void browser_enter(browser *b, const char *name){
-  char candidate[PATH_MAX], resolved[PATH_MAX];
+  char candidate[PATH_MAX];
   join_path(candidate, sizeof(candidate), b->dir, name);
-  if(!fs_absolute_path(candidate, resolved)){
+  std::string absolute;
+  if(!fs_absolute_path(candidate, absolute) || absolute.size() >= sizeof(b->dir)){
     set_status(true, "Could not enter %s: %s", candidate, strerror(errno));
     return;
   }
-  strcpy(b->dir, resolved);
+  snprintf(b->dir, sizeof(b->dir), "%s", absolute.c_str());
   browser_load(b);
 }
 

@@ -104,7 +104,7 @@ typedef struct{
   append_claim claim;                          /**< Claim to send with the body. */
   archive_entry entry;                         /**< The new entry, located at claim.base. */
   unsigned char new_nonce[NONCE_BYTES];        /**< Nonce of the new index. */
-  int body_fd;                                 /**< Temporary file holding the body. */
+  unique_fd body_fd;                           /**< Temporary file holding the body. */
 }append_upload;
 
 /**

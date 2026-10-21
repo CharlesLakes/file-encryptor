@@ -37,7 +37,7 @@ static int local_port(SOCKET s){
   return -1;
 }
 
-net_socket net_listen(const char *address, int port, int *bound_port){
+unique_socket net_listen(const char *address, int port, int *bound_port){
   struct addrinfo hints, *list;
   char service[16];
   memset(&hints, 0, sizeof(hints));
@@ -45,7 +45,7 @@ net_socket net_listen(const char *address, int port, int *bound_port){
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST | AI_NUMERICSERV;
   snprintf(service, sizeof(service), "%d", port);
-  if(getaddrinfo(address, service, &hints, &list) != 0) return NET_INVALID;
+  if(getaddrinfo(address, service, &hints, &list) != 0) return unique_socket();
 
   SOCKET s = INVALID_SOCKET;
   for(struct addrinfo *ai = list; ai && s == INVALID_SOCKET; ai = ai->ai_next){
@@ -60,22 +60,22 @@ net_socket net_listen(const char *address, int port, int *bound_port){
   }
   freeaddrinfo(list);
   if(s != INVALID_SOCKET && bound_port) *bound_port = local_port(s);
-  return s == INVALID_SOCKET ? NET_INVALID : (net_socket) s;
+  return unique_socket(s == INVALID_SOCKET ? NET_INVALID : (net_socket) s);
 }
 
-net_socket net_accept(net_socket listener){
+unique_socket net_accept(net_socket listener){
   SOCKET s = accept((SOCKET) listener, NULL, NULL);
-  return s == INVALID_SOCKET ? NET_INVALID : (net_socket) s;
+  return unique_socket(s == INVALID_SOCKET ? NET_INVALID : (net_socket) s);
 }
 
-net_socket net_connect(const char *host, int port){
+unique_socket net_connect(const char *host, int port){
   struct addrinfo hints, *list;
   char service[16];
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   snprintf(service, sizeof(service), "%d", port);
-  if(getaddrinfo(host, service, &hints, &list) != 0) return NET_INVALID;
+  if(getaddrinfo(host, service, &hints, &list) != 0) return unique_socket();
 
   SOCKET s = INVALID_SOCKET;
   for(struct addrinfo *ai = list; ai && s == INVALID_SOCKET; ai = ai->ai_next){
@@ -86,7 +86,7 @@ net_socket net_connect(const char *host, int port){
     }
   }
   freeaddrinfo(list);
-  return s == INVALID_SOCKET ? NET_INVALID : (net_socket) s;
+  return unique_socket(s == INVALID_SOCKET ? NET_INVALID : (net_socket) s);
 }
 
 bool net_set_timeout(net_socket s, int seconds){

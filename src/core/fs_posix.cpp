@@ -64,29 +64,27 @@ bool fs_same_file(int fd_a, int fd_b){
   return fstat(fd_a, &a) == 0 && fstat(fd_b, &b) == 0 && a.st_dev == b.st_dev && a.st_ino == b.st_ino;
 }
 
-bool fs_absolute_path(const char *path, char *out){
-  return realpath(path, out) != NULL;
-}
-
-bool fs_replace_file(const char *from, int *from_fd, const char *to, int *to_fd){
-  /* POSIX allows renaming over a file that is still open. */
-  if(rename(from, to) != 0) return false;
-  close(*to_fd);
-  *to_fd = *from_fd;
-  *from_fd = -1;
-  fs_lock(*to_fd);
+bool fs_absolute_path(const std::string &path, std::string &out){
+  char resolved[PATH_MAX];
+  if(!realpath(path.c_str(), resolved)) return false;
+  out = resolved;
   return true;
 }
 
-int fs_open_regular(const char *path, bool write){
+bool fs_replace_file(const std::string &from, unique_fd &from_fd, const std::string &to, unique_fd &to_fd){
+  /* POSIX allows renaming over a file that is still open. */
+  if(rename(from.c_str(), to.c_str()) != 0) return false;
+  to_fd = std::move(from_fd);
+  fs_lock(to_fd.get());
+  return true;
+}
+
+unique_fd fs_open_regular(const std::string &path, bool write){
   /* O_NONBLOCK keeps a FIFO from blocking the open; it is cleared afterwards. */
-  int fd = open(path, (write ? O_RDWR : O_RDONLY) | O_NOFOLLOW | O_NONBLOCK | O_BINARY);
+  unique_fd fd(open(path.c_str(), (write ? O_RDWR : O_RDONLY) | O_NOFOLLOW | O_NONBLOCK | O_BINARY));
   struct stat info;
-  if(fd >= 0 && (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode))){
-    close(fd);
-    return -1;
-  }
-  if(fd >= 0) fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
+  if(!fd || fstat(fd.get(), &info) != 0 || !S_ISREG(info.st_mode)) return unique_fd();
+  fcntl(fd.get(), F_SETFL, fcntl(fd.get(), F_GETFL) & ~O_NONBLOCK);
   return fd;
 }
 
@@ -97,13 +95,13 @@ bool fs_file_id(int fd, char *out, size_t out_size){
   return true;
 }
 
-int fs_temp_file(void){
+unique_fd fs_temp_file(){
   const char *dir = getenv("TMPDIR");
   char path[PATH_MAX];
   snprintf(path, sizeof(path), "%s/crls-XXXXXX", dir && dir[0] ? dir : "/tmp");
-  int fd = mkstemp(path);
+  unique_fd fd(mkstemp(path));
   /* The file lives on, nameless, until the descriptor is closed. */
-  if(fd >= 0) unlink(path);
+  if(fd) unlink(path);
   return fd;
 }
 

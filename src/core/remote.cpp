@@ -205,7 +205,7 @@ static bool send_upload(remote_ctx *c, const append_upload *up, http_response *r
   const char *headers[] = {"Content-Type: application/octet-stream", base, index_length, nonce, hash, sig,
                            c->etag[0] ? if_match : NULL, NULL};
 
-  http_request_spec req = {"POST", c->url, headers, up->body_fd, up->claim.content_length, NULL, NULL};
+  http_request_spec req = {"POST", c->url, headers, up->body_fd.get(), up->claim.content_length, NULL, NULL};
   if(http_perform(&req, resp)) return true;
   set_status(true, "Could not upload to %s: %s", c->url, resp->error);
   return false;

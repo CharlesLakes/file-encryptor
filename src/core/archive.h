@@ -76,6 +76,7 @@
 #include <limits.h>
 #include <vector>
 #include "core/source.h"
+#include "lib/unique_fd.h"
 
 namespace crls{
 
@@ -122,7 +123,7 @@ typedef struct{
 typedef struct{
   bool is_open;                                /**< True while an archive is open. */
   bool is_remote;                              /**< True if it was opened from a URL (see remote.h). */
-  int fd;                                      /**< File descriptor, held under an exclusive lock (local only). */
+  unique_fd fd;                                /**< Descriptor, held under an exclusive lock (local only). */
   archive_source src;                          /**< Where every read comes from. */
   char path[PATH_MAX];                         /**< Absolute path or URL of the archive. */
   std::vector<archive_entry> entries;          /**< Entries in index order. */

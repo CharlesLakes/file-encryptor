@@ -66,20 +66,19 @@ static bool hash_file(int fd, uint64_t len, unsigned char *hash){
 /* ---------------- Client ---------------- */
 
 bool append_prepare(archive *a, const char *path, append_upload *up){
-  memset(up, 0, sizeof(*up));
-  up->body_fd = -1;
+  *up = append_upload();
   if(a->version < 3){
     set_status(true, "Uploads need a version 3 archive. Compact it first.");
     return false;
   }
   up->body_fd = fs_temp_file();
-  if(up->body_fd < 0){
+  if(!up->body_fd){
     set_status(true, "Could not create a temporary file.");
     return false;
   }
   /* The ciphertext does not depend on where it is stored, so it is written at
      offset 0 of the body and only the index records its final offset. */
-  if(!archive_encrypt_file(a, path, up->body_fd, 0, &up->entry) || !append_rebase(a, up)){
+  if(!archive_encrypt_file(a, path, up->body_fd.get(), 0, &up->entry) || !append_rebase(a, up)){
     append_discard(up);
     return false;
   }
@@ -99,14 +98,14 @@ bool append_rebase(archive *a, append_upload *up){
   unsigned char *blob;
   uint64_t blob_size;
   if(!archive_build_index(a, &up->entry, &blob, &blob_size)) return false;
-  bool ok = write_at(up->body_fd, blob, (size_t) blob_size, up->entry.stored) &&
-            fs_truncate(up->body_fd, up->entry.stored + blob_size);
+  bool ok = write_at(up->body_fd.get(), blob, (size_t) blob_size, up->entry.stored) &&
+            fs_truncate(up->body_fd.get(), up->entry.stored + blob_size);
   memcpy(up->new_nonce, blob, NONCE_BYTES);
   free(blob);
 
   c->content_length = up->entry.stored + blob_size;
   c->index_length = blob_size;
-  ok = ok && hash_file(up->body_fd, c->content_length, c->body_hash);
+  ok = ok && hash_file(up->body_fd.get(), c->content_length, c->body_hash);
   if(!ok){
     set_status(true, "Could not write the temporary file.");
     return false;
@@ -126,8 +125,7 @@ void append_applied(archive *a, const append_upload *up){
 }
 
 void append_discard(append_upload *up){
-  if(up->body_fd >= 0) close(up->body_fd);
-  up->body_fd = -1;
+  up->body_fd.reset();
 }
 
 /* ---------------- Server ---------------- */

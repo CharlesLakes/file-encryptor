@@ -51,7 +51,7 @@ static append_result serve(const char *crls, const append_upload *up){
   append_result r = append_load_state(fd, &st);
   if(r == APPEND_OK) r = append_check(&st, &up->claim, MAX_BODY);
   if(r == APPEND_OK){
-    fd_reader_ctx ctx = {up->body_fd, 0};
+    fd_reader_ctx ctx = {up->body_fd.get(), 0};
     r = append_commit(fd, &st, &up->claim, fd_reader, &ctx);
   }
   close(fd);
@@ -184,9 +184,9 @@ int main(int argc, char **argv){
   close(fd);
   CHECK(prepare(crls, PASSWORD, "fifth.bin", &up));
   unsigned char byte;
-  CHECK(read_at(up.body_fd, &byte, 1, 10));
+  CHECK(read_at(up.body_fd.get(), &byte, 1, 10));
   byte ^= 1;
-  CHECK(write_at(up.body_fd, &byte, 1, 10));
+  CHECK(write_at(up.body_fd.get(), &byte, 1, 10));
   CHECK(serve(crls, &up) == APPEND_BAD_REQUEST);
   fd = open(crls, O_RDONLY | O_BINARY);
   CHECK(file_size(fd) == size_before);

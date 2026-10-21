@@ -31,6 +31,48 @@ typedef intptr_t net_socket;
 #define NET_INVALID ((net_socket) -1)   /**< Value of an invalid socket. */
 
 /**
+ * @brief Closes a socket. Safe on NET_INVALID.
+ * @param s Socket.
+ */
+void       net_close(net_socket s);
+
+/**
+ * @brief Owns a socket and closes it on destruction (move-only).
+ */
+class unique_socket{
+public:
+  unique_socket() = default;
+
+  /** @brief Takes ownership of s, which may be NET_INVALID. */
+  explicit unique_socket(net_socket s) noexcept : s_(s) {}
+
+  ~unique_socket(){ net_close(s_); }
+
+  unique_socket(const unique_socket &) = delete;
+  unique_socket& operator=(const unique_socket &) = delete;
+
+  unique_socket(unique_socket &&other) noexcept : s_(other.s_){ other.s_ = NET_INVALID; }
+
+  unique_socket& operator=(unique_socket &&other) noexcept{
+    if(this != &other){
+      net_close(s_);
+      s_ = other.s_;
+      other.s_ = NET_INVALID;
+    }
+    return *this;
+  }
+
+  /** @brief Returns the socket without giving up ownership. */
+  net_socket get() const noexcept{ return s_; }
+
+  /** @brief True if a socket is owned. */
+  explicit operator bool() const noexcept{ return s_ != NET_INVALID; }
+
+private:
+  net_socket s_ = NET_INVALID;
+};
+
+/**
  * @brief  Prepares the socket library (Winsock startup; ignoring SIGPIPE on
  *         POSIX, so that a client closing early cannot kill the process).
  * @return True on success, false otherwise.
@@ -42,24 +84,24 @@ bool       net_init(void);
  * @param  address    Address to bind, e.g. "127.0.0.1", "0.0.0.0" or "::".
  * @param  port       Port, or 0 to let the system choose one.
  * @param  bound_port Output: the port actually bound (may be NULL).
- * @return Listening socket, or NET_INVALID on error.
+ * @return Listening socket, empty on error.
  */
-net_socket net_listen(const char *address, int port, int *bound_port);
+unique_socket net_listen(const char *address, int port, int *bound_port);
 
 /**
  * @brief  Waits for the next connection.
  * @param  listener Listening socket.
- * @return Connected socket, or NET_INVALID on error.
+ * @return Connected socket, empty on error.
  */
-net_socket net_accept(net_socket listener);
+unique_socket net_accept(net_socket listener);
 
 /**
  * @brief  Connects to a TCP server.
  * @param  host Host name or address.
  * @param  port Port.
- * @return Connected socket, or NET_INVALID on error.
+ * @return Connected socket, empty on error.
  */
-net_socket net_connect(const char *host, int port);
+unique_socket net_connect(const char *host, int port);
 
 /**
  * @brief  Sets the receive and send timeouts of a socket.
@@ -87,12 +129,6 @@ long       net_recv(net_socket s, void *buf, size_t len);
  * @return True on success, false on error, timeout or closed connection.
  */
 bool       net_send_all(net_socket s, const void *buf, size_t len);
-
-/**
- * @brief Closes a socket. Safe on NET_INVALID.
- * @param s Socket.
- */
-void       net_close(net_socket s);
 
 }
 

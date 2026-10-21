@@ -76,12 +76,11 @@ int start_test_server(const char *dir){
 void stop_test_server(void){
   /* accept() is blocking: set the flag, then wake it up with a connection. */
   stop_flag = 1;
-  net_socket s = net_connect("127.0.0.1", port);
-  if(s != NET_INVALID){
-    net_send_all(s, "HEAD / HTTP/1.1\r\n\r\n", 19);
+  unique_socket s = net_connect("127.0.0.1", port);
+  if(s){
+    net_send_all(s.get(), "HEAD / HTTP/1.1\r\n\r\n", 19);
     char buf[256];
-    while(net_recv(s, buf, sizeof(buf)) > 0){}
-    net_close(s);
+    while(net_recv(s.get(), buf, sizeof(buf)) > 0){}
   }
 #ifdef _WIN32
   WaitForSingleObject(thread, INFINITE);

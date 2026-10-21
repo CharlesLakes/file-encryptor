@@ -47,19 +47,19 @@ typedef struct{
  */
 static bool request(const char *head, const void *body, size_t body_len, response *r){
   memset(r, 0, sizeof(*r));
-  net_socket s = net_connect("127.0.0.1", port);
-  if(s == NET_INVALID) return false;
-  net_set_timeout(s, 10);
-  bool ok = net_send_all(s, head, strlen(head)) && (!body || net_send_all(s, body, body_len));
+  unique_socket s = net_connect("127.0.0.1", port);
+  if(!s) return false;
+  net_set_timeout(s.get(), 10);
+  bool ok = net_send_all(s.get(), head, strlen(head)) && (!body || net_send_all(s.get(), body, body_len));
 
   size_t cap = 1 << 16, len = 0;
   unsigned char *buf = (unsigned char *) malloc(cap);
   long n;
-  while(ok && (n = net_recv(s, buf + len, cap - len)) > 0){
+  while(ok && (n = net_recv(s.get(), buf + len, cap - len)) > 0){
     len += (size_t) n;
     if(len == cap) buf = (unsigned char *) realloc(buf, cap *= 2);
   }
-  net_close(s);
+  s = unique_socket();
 
   unsigned char *end = NULL;
   for(size_t i = 0; i + 3 < len; i++)
@@ -138,7 +138,7 @@ static int post(const char *target, const append_upload *up, uint64_t send){
   char head[1024];
   post_head(target, up, head);
   unsigned char *body = (unsigned char *) malloc((size_t) up->claim.content_length + 1);
-  read_at(up->body_fd, body, (size_t) up->claim.content_length, 0);
+  read_at(up->body_fd.get(), body, (size_t) up->claim.content_length, 0);
   response r;
   bool ok = request(head, body, (size_t) send, &r);
   free(body);

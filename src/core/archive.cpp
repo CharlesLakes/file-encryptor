@@ -13,6 +13,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
+#include <utility>
 #include <unistd.h>
 #include <sys/stat.h>
 #include "core/fs.h"
@@ -103,7 +105,9 @@ static bool derive_keys(archive *a, const char *password, const unsigned char *h
  * @param path Path of the archive.
  */
 static void remember_path(archive *a, const char *path){
-  if(!fs_absolute_path(path, a->path)) snprintf(a->path, sizeof(a->path), "%s", path);
+  std::string resolved;
+  if(!fs_absolute_path(path, resolved)) resolved = path;
+  snprintf(a->path, sizeof(a->path), "%s", resolved.c_str());
 }
 
 int archive_find_entry(archive *a, const char *name){
@@ -266,7 +270,6 @@ bool archive_crypto_init(void){
 
 void archive_init(archive *a){
   *a = archive();
-  a->fd = -1;
   a->src.fd = -1;
 }
 
@@ -275,8 +278,7 @@ void archive_close(archive *a){
   sodium_memzero(a->key, sizeof(a->key));
   sodium_memzero(a->sign_sk, sizeof(a->sign_sk));
   source_close(&a->src);
-  if(a->fd >= 0) close(a->fd);
-  a->fd = -1;
+  a->fd.reset();
   a->is_open = false;
   a->is_remote = false;
   a->path[0] = '\0';
@@ -378,25 +380,23 @@ static bool load_from_source(archive *a, const char *name, const char *password)
 }
 
 bool archive_open(archive *a, const char *path, const char *password){
-  int fd = open(path, O_RDWR | O_BINARY);
-  if(fd < 0){
+  unique_fd fd(open(path, O_RDWR | O_BINARY));
+  if(!fd){
     set_status(true, "Could not open %s: %s", path, strerror(errno));
     return false;
   }
-  if(!fs_lock(fd)){
-    close(fd);
+  if(!fs_lock(fd.get())){
     set_status(true, "%s is already open in another program.", path);
     return false;
   }
 
-  source_from_fd(&a->src, fd);
+  source_from_fd(&a->src, fd.get());
   if(!load_from_source(a, path, password)){
     source_close(&a->src);
-    close(fd);
     return false;
   }
 
-  a->fd = fd;
+  a->fd = std::move(fd);
   a->is_open = true;
   remember_path(a, path);
   return true;
@@ -421,12 +421,12 @@ bool archive_create(archive *a, const char *path, const char *password){
 
 bool archive_create_params(archive *a, const char *path, const char *password, uint64_t ops, uint64_t mem){
   status_error = false;
-  int fd = open(path, O_RDWR | O_CREAT | O_EXCL | O_BINARY, 0600);
-  if(fd < 0){
+  unique_fd fd(open(path, O_RDWR | O_CREAT | O_EXCL | O_BINARY, 0600));
+  if(!fd){
     set_status(true, "Could not create %s: %s", path, strerror(errno));
     return false;
   }
-  fs_lock(fd);
+  fs_lock(fd.get());
 
   set_layout(a, 3);
   unsigned char header[MAX_HEADER_BYTES] = {0};
@@ -438,7 +438,7 @@ bool archive_create_params(archive *a, const char *path, const char *password, u
   randombytes_buf(header + 24, SALT_BYTES);
 
   if(!derive_keys(a, password, header, header + 40)){
-    close(fd);
+    fd.reset();
     unlink(path);
     set_status(true, "Not enough memory to derive the key.");
     return false;
@@ -446,17 +446,17 @@ bool archive_create_params(archive *a, const char *path, const char *password, u
 
   clear_entries(a);
   memcpy(a->header_ad, header, a->ad_len);
-  if(!write_at(fd, header, a->header_bytes, 0) || !write_index_to(a, fd)){
+  if(!write_at(fd.get(), header, a->header_bytes, 0) || !write_index_to(a, fd.get())){
     if(!status_error) set_status(true, "Could not write %s: %s", path, strerror(errno));
     sodium_memzero(a->key, sizeof(a->key));
     sodium_memzero(a->sign_sk, sizeof(a->sign_sk));
-    close(fd);
+    fd.reset();
     unlink(path);
     return false;
   }
 
-  a->fd = fd;
-  source_from_fd(&a->src, fd);
+  a->fd = std::move(fd);
+  source_from_fd(&a->src, a->fd.get());
   a->is_open = true;
   remember_path(a, path);
   return true;
@@ -506,7 +506,7 @@ bool archive_encrypt_file(archive *a, const char *path, int fd, uint64_t positio
     set_status(true, "Could not read %s.", path);
     return false;
   }
-  if(a->fd >= 0 && fs_same_file(a->fd, fileno(source))){
+  if(a->fd && fs_same_file(a->fd.get(), fileno(source))){
     fclose(source);
     set_status(true, "A .crls cannot be added to itself.");
     return false;
@@ -549,16 +549,16 @@ bool archive_encrypt_file(archive *a, const char *path, int fd, uint64_t positio
 
 bool archive_add_file(archive *a, const char *path){
   archive_entry e;
-  uint64_t end = file_size(a->fd);
-  if(!archive_encrypt_file(a, path, a->fd, end, &e)){
-    fs_truncate(a->fd, end);
+  uint64_t end = file_size(a->fd.get());
+  if(!archive_encrypt_file(a, path, a->fd.get(), end, &e)){
+    fs_truncate(a->fd.get(), end);
     return false;
   }
 
   a->entries.push_back(e);
-  if(!write_index_to(a, a->fd)){
+  if(!write_index_to(a, a->fd.get())){
     a->entries.pop_back();
-    fs_truncate(a->fd, e.offset);
+    fs_truncate(a->fd.get(), e.offset);
     return false;
   }
 
@@ -572,7 +572,7 @@ bool archive_delete_entry(archive *a, unsigned int index){
   archive_entry removed = a->entries[index];
   a->entries.erase(a->entries.begin() + index);
 
-  if(!write_index_to(a, a->fd)){
+  if(!write_index_to(a, a->fd.get())){
     /* Restore the entry at its original position. */
     a->entries.insert(a->entries.begin() + index, removed);
     return false;
@@ -717,8 +717,8 @@ bool archive_compact(archive *a){
   status_error = false;
   char tmp_path[PATH_MAX + 8];
   snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", a->path);
-  int fd = open(tmp_path, O_RDWR | O_CREAT | O_TRUNC | O_BINARY, 0600);
-  if(fd < 0){
+  unique_fd fd(open(tmp_path, O_RDWR | O_CREAT | O_TRUNC | O_BINARY, 0600));
+  if(!fd){
     set_status(true, "Could not create %s: %s", tmp_path, strerror(errno));
     return false;
   }
@@ -742,18 +742,18 @@ bool archive_compact(archive *a){
     derive_v3_keys(a, saved_key, header + 40);
     memcpy(a->header_ad, header, a->ad_len);
   }
-  bool ok = write_at(fd, header, a->header_bytes, 0);
+  bool ok = write_at(fd.get(), header, a->header_bytes, 0);
 
   uint64_t position = a->header_bytes;
   for(unsigned int i = 0; ok && i < a->entries.size(); i++){
     archive_entry *e = archive_get_entry(a, i);
     if(upgrade){
-      ok = reencrypt_entry(a, e, saved_key, fd, position);
+      ok = reencrypt_entry(a, e, saved_key, fd.get(), position);
     }else{
       for(uint64_t copied = 0; ok && copied < e->stored; ){
         size_t len = e->stored - copied < sizeof(cipher_chunk) ? (size_t) (e->stored - copied) : sizeof(cipher_chunk);
         ok = a->src.read_at(&a->src, cipher_chunk, len, e->offset + copied) &&
-             write_at(fd, cipher_chunk, len, position + copied);
+             write_at(fd.get(), cipher_chunk, len, position + copied);
         copied += len;
       }
     }
@@ -761,7 +761,7 @@ bool archive_compact(archive *a){
     position += e->stored;
   }
 
-  ok = ok && write_index_to(a, fd) && fs_replace_file(tmp_path, &fd, a->path, &a->fd);
+  ok = ok && write_index_to(a, fd.get()) && fs_replace_file(tmp_path, fd, a->path, a->fd);
 
   if(!ok){
     a->entries = saved;
@@ -776,20 +776,20 @@ bool archive_compact(archive *a){
   sodium_memzero(saved_sk, sizeof(saved_sk));
 
   if(!ok){
-    if(fd >= 0) close(fd);
+    fd.reset();
     unlink(tmp_path);
-    if(a->fd < 0){
+    if(!a->fd){
       archive_close(a);
       set_status(true, "Could not reopen the archive after compacting.");
       return false;
     }
     /* On Windows the descriptor may have been reopened. */
-    source_from_fd(&a->src, a->fd);
+    source_from_fd(&a->src, a->fd.get());
     if(!status_error) set_status(true, "Could not compact: %s", strerror(errno));
     return false;
   }
 
-  source_from_fd(&a->src, a->fd);
+  source_from_fd(&a->src, a->fd.get());
   return true;
 }
 

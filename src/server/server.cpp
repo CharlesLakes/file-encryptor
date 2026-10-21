@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <time.h>
 #include <unistd.h>
 #include "core/append.h"
@@ -165,22 +166,19 @@ static int serve_archive(const server_config *cfg, net_socket s, const http_requ
                          const char *name, bool head_only){
   char path[PATH_MAX], etag[80], range[128], extra[512];
   join_path(path, sizeof(path), cfg->dir, name);
-  int fd = fs_open_regular(path, false);
-  if(fd < 0) return send_error(s, 404, "", head_only);
-  if(!make_etag(fd, etag, sizeof(etag))){
-    close(fd);
+  unique_fd fd = fs_open_regular(path, false);
+  if(!fd) return send_error(s, 404, "", head_only);
+  if(!make_etag(fd.get(), etag, sizeof(etag))){
     return send_error(s, 500, "", head_only);
   }
   if(!if_match_ok(req, etag)){
-    close(fd);
     return send_error(s, 412, "", head_only);
   }
 
-  uint64_t size = file_size(fd), first = 0, last = size ? size - 1 : 0;
+  uint64_t size = file_size(fd.get()), first = 0, last = size ? size - 1 : 0;
   int status = 200;
   if(http_get_header(req, "Range", range, sizeof(range))){
     if(http_parse_range(range, size, &first, &last) != HTTP_RANGE_OK){
-      close(fd);
       snprintf(extra, sizeof(extra), "Content-Range: bytes */%llu\r\n", (unsigned long long) size);
       return send_error(s, 416, extra, head_only);
     }
@@ -189,8 +187,7 @@ static int serve_archive(const server_config *cfg, net_socket s, const http_requ
   uint64_t length = size ? last - first + 1 : 0;
 
   /* On Windows a file locked by the GUI cannot be read: say so before any header. */
-  if(length > 0 && !read_at(fd, send_chunk, 1, first)){
-    close(fd);
+  if(length > 0 && !read_at(fd.get(), send_chunk, 1, first)){
     return send_error(s, 503, "Retry-After: 5\r\n", head_only);
   }
 
@@ -201,10 +198,9 @@ static int serve_archive(const server_config *cfg, net_socket s, const http_requ
   bool ok = send_head(s, status, "application/octet-stream", length, extra);
   for(uint64_t sent = 0; ok && !head_only && sent < length; ){
     size_t chunk = length - sent < sizeof(send_chunk) ? (size_t) (length - sent) : sizeof(send_chunk);
-    ok = read_at(fd, send_chunk, chunk, first + sent) && net_send_all(s, send_chunk, chunk);
+    ok = read_at(fd.get(), send_chunk, chunk, first + sent) && net_send_all(s, send_chunk, chunk);
     sent += chunk;
   }
-  close(fd);
   return status;
 }
 
@@ -295,19 +291,17 @@ static int serve_append(const server_config *cfg, net_socket s, const http_reque
 
   char path[PATH_MAX], etag[80];
   join_path(path, sizeof(path), cfg->dir, name);
-  int fd = fs_open_regular(path, true);
-  if(fd < 0) return send_error(s, 404, "", false);
-  if(!make_etag(fd, etag, sizeof(etag)) || !if_match_ok(req, etag)){
-    close(fd);
+  unique_fd fd = fs_open_regular(path, true);
+  if(!fd) return send_error(s, 404, "", false);
+  if(!make_etag(fd.get(), etag, sizeof(etag)) || !if_match_ok(req, etag)){
     return send_error(s, 412, "", false);
   }
-  if(!fs_lock(fd)){
-    close(fd);
+  if(!fs_lock(fd.get())){
     return send_error(s, 423, "", false);
   }
 
   append_state st;
-  append_result r = append_load_state(fd, &st);
+  append_result r = append_load_state(fd.get(), &st);
   if(r == APPEND_OK) r = append_check(&st, &claim, cfg->max_upload);
   if(r == APPEND_OK){
     char expect[64];
@@ -315,9 +309,8 @@ static int serve_append(const server_config *cfg, net_socket s, const http_reque
       net_send_all(s, "HTTP/1.1 100 Continue\r\n\r\n", 25);
     body_ctx ctx = {s, pending, pending_len,
                     time(NULL) + cfg->timeout + (time_t) (claim.content_length / MIN_BODY_RATE)};
-    r = append_commit(fd, &st, &claim, body_reader, &ctx);
+    r = append_commit(fd.get(), &st, &claim, body_reader, &ctx);
   }
-  close(fd);
   return send_error(s, append_status(r), "", false);
 }
 
@@ -375,8 +368,8 @@ int server_run(const server_config *cfg){
     return 1;
   }
   int port = 0;
-  net_socket listener = net_listen(cfg->bind, cfg->port, &port);
-  if(listener == NET_INVALID){
+  unique_socket listener = net_listen(cfg->bind, cfg->port, &port);
+  if(!listener){
     fprintf(stderr, "Could not listen on %s port %d.\n", cfg->bind, cfg->port);
     return 1;
   }
@@ -391,16 +384,15 @@ int server_run(const server_config *cfg){
   fflush(stdout);
 
   while(!cfg->stop || !*cfg->stop){
-    net_socket s = net_accept(listener);
-    if(s == NET_INVALID) continue;
-    net_set_timeout(s, cfg->timeout);
+    unique_socket s = net_accept(listener.get());
+    if(!s) continue;
+    net_set_timeout(s.get(), cfg->timeout);
     char method[16] = "-", target[256] = "-";
-    int status = handle_connection(cfg, s, method, target);
-    net_close(s);
+    int status = handle_connection(cfg, s.get(), method, target);
+    s = unique_socket();
     if(status) printf("%s %s %d\n", method, target, status);
     fflush(stdout);
   }
-  net_close(listener);
   return 0;
 }
 
@@ -415,7 +407,7 @@ static void server_usage(void){
 }
 
 int server_main(int argc, char **argv){
-  static char dir[PATH_MAX];
+  static std::string dir;
   server_config cfg = {NULL, DEFAULT_BIND, DEFAULT_PORT, DEFAULT_MAX_UPLOAD, DEFAULT_TIMEOUT, NULL, NULL};
   if(argc < 2){
     server_usage();
@@ -425,7 +417,7 @@ int server_main(int argc, char **argv){
     fprintf(stderr, "Could not find the folder %s.\n", argv[1]);
     return 2;
   }
-  cfg.dir = dir;
+  cfg.dir = dir.c_str();
 
   /* Every option takes a value: they come in pairs. */
   for(int i = 2; i < argc; i += 2){

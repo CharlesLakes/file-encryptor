@@ -27,6 +27,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <fcntl.h>
+#include <string>
+#include "lib/unique_fd.h"
 
 namespace crls{
 
@@ -93,20 +95,20 @@ bool        fs_same_file(int fd_a, int fd_b);
 
 /**
  * @brief  Resolves path into an absolute, normalized path.
- * @param  path     Path to resolve.
- * @param  out      Destination buffer of PATH_MAX bytes.
+ * @param  path Path to resolve (an existing file or folder).
+ * @param  out  Output: the absolute path (may be the same object as path).
  * @return True on success, false otherwise.
  */
-bool        fs_absolute_path(const char *path, char *out);
+bool        fs_absolute_path(const std::string &path, std::string &out);
 
 /**
  * @brief  Replaces the file at to with the file at from.
  *
- * On success *to_fd is a locked read-write descriptor of the replaced file and
- * *from_fd is -1; the previous descriptors are closed. On failure both files
- * are left untouched and both descriptors remain open, except in the unlikely
- * case where the replacement succeeded but the file could not be reopened:
- * then both descriptors are -1.
+ * On success to_fd holds a locked read-write descriptor of the replaced file
+ * and from_fd is empty; the previous descriptors are closed. On failure both
+ * files are left untouched and both descriptors remain open, except in the
+ * unlikely case where the replacement succeeded but the file could not be
+ * reopened: then both are empty.
  *
  * @param  from    Path of the new file.
  * @param  from_fd Descriptor of the new file.
@@ -114,16 +116,16 @@ bool        fs_absolute_path(const char *path, char *out);
  * @param  to_fd   Descriptor of the file to replace.
  * @return True on success, false otherwise.
  */
-bool        fs_replace_file(const char *from, int *from_fd, const char *to, int *to_fd);
+bool        fs_replace_file(const std::string &from, unique_fd &from_fd, const std::string &to, unique_fd &to_fd);
 
 /**
  * @brief  Opens an existing regular file, refusing symbolic links (or reparse
  *         points), folders, devices and pipes.
  * @param  path  Path of the file.
  * @param  write True for read-write access, false for read-only.
- * @return File descriptor, or -1 on error.
+ * @return The descriptor, empty on error.
  */
-int         fs_open_regular(const char *path, bool write);
+unique_fd   fs_open_regular(const std::string &path, bool write);
 
 /**
  * @brief  Describes the identity of an open file (device and inode, or volume
@@ -138,9 +140,9 @@ bool        fs_file_id(int fd, char *out, size_t out_size);
 
 /**
  * @brief  Creates an anonymous temporary file, deleted when it is closed.
- * @return Read-write file descriptor, or -1 on error.
+ * @return Read-write descriptor, empty on error.
  */
-int         fs_temp_file(void);
+unique_fd   fs_temp_file();
 
 /**
  * @brief  Checks whether c separates path components.
