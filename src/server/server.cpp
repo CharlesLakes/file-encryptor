@@ -317,15 +317,24 @@ static int serve_append(const server_config &cfg, net_socket s, const http_reque
 
 /* ---------------- Connections ---------------- */
 
+/** @brief What the log line of a connection shows. */
+struct request_log{
+  int status = 0;            /**< Status code, or 0 if nothing could be answered. */
+  std::string method = "-";  /**< Request method. */
+  std::string target = "-";  /**< Request target, truncated. */
+};
+
+/** @brief Longest target written to the log. */
+inline constexpr std::size_t MAX_LOGGED_TARGET = 255;
+
 /**
- * @brief  Reads one request from a connection and answers it.
- * @param  cfg    Settings.
- * @param  s      Socket.
- * @param  method Output: method, for logging.
- * @param  target Output: target, for logging.
+ * @brief  Answers one request from a connection.
+ * @param  cfg Settings.
+ * @param  s   Socket.
+ * @param  log Output: method and target, once the request line is parsed.
  * @return Status code, or 0 if nothing could be answered.
  */
-static int handle_connection(const server_config &cfg, net_socket s, char *method, char *target){
+static int answer_request(const server_config &cfg, net_socket s, request_log &log){
   static char head[http_max_head];
   http_request req;
   http_parse parsed = http_parse::incomplete;
@@ -345,9 +354,8 @@ static int handle_connection(const server_config &cfg, net_socket s, char *metho
   if(parsed == http_parse::too_large) return send_error(s, 431, "", false);
   if(parsed == http_parse::unsupported) return send_error(s, 501, "", false);
   if(parsed != http_parse::ok) return send_error(s, 400, "", false);
-  /* The target is truncated for the log. */
-  snprintf(method, 16, "%.*s", static_cast<int>(req.method.size()), req.method.data());
-  snprintf(target, 256, "%.*s", static_cast<int>(req.target.size() < 255 ? req.target.size() : 255), req.target.data());
+  log.method = req.method;
+  log.target = req.target.substr(0, MAX_LOGGED_TARGET);
 
   bool get = req.method == "GET", head_only = req.method == "HEAD", post = req.method == "POST";
   if(!get && !head_only && !post) return send_error(s, 405, "Allow: GET, HEAD, POST\r\n", false);
@@ -362,6 +370,18 @@ static int handle_connection(const server_config &cfg, net_socket s, char *metho
   if(!valid_archive_name(name.c_str())) return send_error(s, 404, "", head_only);
   if(post) return serve_append(cfg, s, &req, name.c_str(), head + req.head_length, len - req.head_length);
   return serve_archive(cfg, s, &req, name.c_str(), head_only);
+}
+
+/**
+ * @brief  Reads one request from a connection and answers it.
+ * @param  cfg Settings.
+ * @param  s   Socket.
+ * @return The status code with the method and target, for the log.
+ */
+static request_log handle_connection(const server_config &cfg, net_socket s){
+  request_log log;
+  log.status = answer_request(cfg, s, log);
+  return log;
 }
 
 int server_run(const server_config &cfg){
@@ -389,10 +409,9 @@ int server_run(const server_config &cfg){
     unique_socket s = net_accept(listener.socket.get());
     if(!s) continue;
     net_set_timeout(s.get(), cfg.timeout);
-    char method[16] = "-", target[256] = "-";
-    int status = handle_connection(cfg, s.get(), method, target);
+    request_log log = handle_connection(cfg, s.get());
     s.reset();
-    if(status) printf("%s %s %d\n", method, target, status);
+    if(log.status) printf("%s %s %d\n", log.method.c_str(), log.target.c_str(), log.status);
     fflush(stdout);
   }
   return 0;
