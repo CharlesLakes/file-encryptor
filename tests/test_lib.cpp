@@ -7,8 +7,10 @@
  */
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <new>
+#include <string>
 #include <utility>
 #include <fcntl.h>
 #include "core/archive.h"
@@ -42,7 +44,7 @@ static void check_secret_wipe(){
   alignas(crls::secret<32>) unsigned char storage[sizeof(crls::secret<32>)];
   auto *s = new (storage) crls::secret<32>();
   std::memset(s->data(), 0xAB, s->size());
-  CHECK(s->data()[31] == 0xAB);
+  CHECK_EQ(s->data()[31], 0xAB);
   s->~basic_secret();
   bool zero = true;
   for(unsigned char c : storage) zero = zero && c == 0;
@@ -51,7 +53,8 @@ static void check_secret_wipe(){
 
 int main(){
   CHECK(archive_crypto_init());
-  CHECK(make_temp_dir());
+  temp_dir scratch;
+  CHECK(static_cast<bool>(scratch));
 
   /* unique_fd: ownership, move and release. */
   char path[PATH_MAX];
@@ -60,7 +63,7 @@ int main(){
   {
     crls::unique_fd fd(open(path, O_RDONLY | O_BINARY));
     CHECK(static_cast<bool>(fd));
-    CHECK(file_size(fd.get()) == 100);
+    CHECK_EQ(file_size(fd.get()), 100);
     crls::unique_fd moved(std::move(fd));
     CHECK(!fd && moved);
     int raw = moved.release();
@@ -101,6 +104,16 @@ int main(){
   crls::function_ref<int(int)> none;
   CHECK(!none);
 
-  remove_temp_dir();
+  /* CHECK_EQ reports a mismatch, also between integers of different signedness;
+     the expected failure is undone here. */
+  int before = failures;
+  printf("The next FAIL line is expected:\n");
+  CHECK_EQ(-1, static_cast<unsigned>(-1));
+  CHECK_EQ(std::string("same"), "same");
+  CHECK_EQ(sum_calls(2, square), 5u);
+  bool reported = failures == before + 1;
+  failures = before;
+  CHECK(reported);
+
   return test_summary();
 }

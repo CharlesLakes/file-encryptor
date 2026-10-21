@@ -167,14 +167,15 @@ int main(int argc, char **argv){
     return 2;
   }
   CHECK(archive_crypto_init());
-  CHECK(make_temp_dir());
+  temp_dir scratch;
+  CHECK(static_cast<bool>(scratch));
   CHECK(net_init());
 
   /* The served folder: a version 3 archive, the version 2 fixture and a file
      that must not be served. */
   char served[PATH_MAX], crls[PATH_MAX], file[PATH_MAX], source[PATH_MAX], v2[PATH_MAX];
   path_in(served, "served");
-  CHECK(make_dir(served) == 0);
+  CHECK_EQ(make_dir(served), 0);
   join_path(crls, sizeof(crls), served, "remote.crls");
   join_path(v2, sizeof(v2), served, "old.crls");
   join_path(source, sizeof(source), argv[1], "v2.crls");
@@ -190,7 +191,8 @@ int main(int argc, char **argv){
   CHECK(a.add_file(file));
   a.close();
 
-  port = start_test_server(served);
+  test_server server(served);
+  port = server.port();
   CHECK(port > 0);
 
   response r;
@@ -262,7 +264,7 @@ int main(int argc, char **argv){
   CHECK(get("HEAD", "/", "", &r) == 200);
   free(r.body);
   fd = open(crls, O_RDONLY | O_BINARY);
-  CHECK(file_size(fd) == size);
+  CHECK_EQ(file_size(fd), size);
   close(fd);
 
   /* While the archive is locked (open in the GUI), uploads wait: 423. */
@@ -279,10 +281,10 @@ int main(int argc, char **argv){
 
   /* The archive now holds the three files, readable with the password. */
   CHECK(a.open(crls, PASSWORD));
-  CHECK(a.entries().size() == 3);
+  CHECK_EQ(a.entries().size(), 3);
   char out[PATH_MAX];
   path_in(out, "out");
-  CHECK(make_dir(out) == 0);
+  CHECK_EQ(make_dir(out), 0);
   const char *names[] = {"first.bin", "second.bin", "third.bin"};
   for(unsigned int i = 0; i < 3 && i < a.entries().size(); i++){
     char original[PATH_MAX], extracted[PATH_MAX];
@@ -294,8 +296,6 @@ int main(int argc, char **argv){
   }
   a.close();
 
-  stop_test_server();
 
-  remove_temp_dir();
   return test_summary();
 }

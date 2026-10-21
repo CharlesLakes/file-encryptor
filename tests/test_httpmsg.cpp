@@ -101,7 +101,7 @@ int main(){
   CHECK(req.method == "POST" && req.target == "/x.crls");
   CHECK(http_header_value(req, "x-crls-sig") == std::optional<std::string_view>("abc"));
   CHECK(req.has_length && req.content_length == 4);
-  CHECK(text.substr(req.head_length) == "BODY");
+  CHECK_EQ(text.substr(req.head_length), "BODY");
   CHECK(!http_header_value(req, "Missing"));
 
   /* Limits on line length and header count. */
@@ -136,7 +136,7 @@ int main(){
 
   const unsigned char bytes[3] = {0x00, 0xab, 0xff};
   unsigned char back[3];
-  CHECK(http_hex_encode(bytes) == "00abff");
+  CHECK_EQ(http_hex_encode(bytes), "00abff");
   CHECK(http_hex_decode("00ABff", back) && memcmp(back, bytes, 3) == 0);
   CHECK(!http_hex_decode("00abf", back));
   CHECK(!http_hex_decode("00abfg", back));

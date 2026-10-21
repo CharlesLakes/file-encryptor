@@ -46,7 +46,7 @@ static uint64_t size_of(const char *path){
 static void check_extract(archive *a, const char *out){
   char dir[PATH_MAX];
   path_in(dir, out);
-  CHECK(make_dir(dir) == 0);
+  CHECK_EQ(make_dir(dir), 0);
   for(unsigned int i = 0; i < a->entries().size(); i++){
     const char *name = a->entries()[i].name.c_str();
     char original[PATH_MAX], extracted[PATH_MAX];
@@ -57,13 +57,14 @@ static void check_extract(archive *a, const char *out){
   }
 }
 
-int main(void){
+int main(){
   CHECK(archive_crypto_init());
-  CHECK(make_temp_dir());
+  temp_dir scratch;
+  CHECK(static_cast<bool>(scratch));
 
   char served[PATH_MAX], crls[PATH_MAX], file[PATH_MAX], url[256];
   path_in(served, "served");
-  CHECK(make_dir(served) == 0);
+  CHECK_EQ(make_dir(served), 0);
   join_path(crls, sizeof(crls), served, "shared.crls");
   /* Larger than the 1 MiB read block, to go through several Range requests. */
   make_file("big.bin", 3 * REMOTE_BLOCK + 12345, 31);
@@ -80,7 +81,8 @@ int main(void){
   CHECK(a.add_file(file));
   a.close();
 
-  int port = start_test_server(served);
+  test_server server(served);
+  int port = server.port();
   CHECK(port > 0);
   snprintf(url, sizeof(url), "http://127.0.0.1:%d/shared.crls", port);
 
@@ -89,8 +91,6 @@ int main(void){
   CHECK(!a.is_open() && a.entries().size() == 0);
   if(strstr(status_text, "libcurl") != NULL){
     printf("SKIP: %s\n", status_text);
-    stop_test_server();
-    remove_temp_dir();
     return SKIP;
   }
 
@@ -104,7 +104,7 @@ int main(void){
   uint64_t before = size_of(crls);
   path_in(file, "upload-a.bin");
   CHECK(remote_add_file(a, file));
-  CHECK(a.entries().size() == 3);
+  CHECK_EQ(a.entries().size(), 3);
   const archive_entry &added = a.entries()[2];
   CHECK(size_of(crls) == before + added.stored + a.index_length());
 
@@ -115,7 +115,7 @@ int main(void){
   CHECK(remote_add_file(a, file));
   path_in(file, "upload-c.bin");
   CHECK(remote_add_file(b, file));
-  CHECK(b.entries().size() == 5);
+  CHECK_EQ(b.entries().size(), 5);
   b.close();
 
   /* A client that does not know the password cannot upload. */
@@ -132,26 +132,24 @@ int main(void){
   /* Everything is there when the archive is opened again, remotely or locally. */
   a.close();
   CHECK(remote_open(a, url, PASSWORD));
-  CHECK(a.entries().size() == 5);
+  CHECK_EQ(a.entries().size(), 5);
   check_extract(&a, "out2");
 
   /* Compacting the archive on the server replaces the file: the open remote
      archive notices and asks to be opened again. */
   archive local;
   CHECK(local.open(crls, PASSWORD));
-  CHECK(local.entries().size() == 5);
+  CHECK_EQ(local.entries().size(), 5);
   CHECK(local.remove(4));
   CHECK(local.compact());
   local.close();
   char dir[PATH_MAX];
   path_in(dir, "out3");
-  CHECK(make_dir(dir) == 0);
+  CHECK_EQ(make_dir(dir), 0);
   CHECK(a.extract(0, dir) == extract_result::failed);
   CHECK(strstr(status_text, "Open it again") != NULL);
   a.close();
   b.close();
 
-  stop_test_server();
-  remove_temp_dir();
   return test_summary();
 }

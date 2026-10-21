@@ -177,8 +177,8 @@ src/
     heap_buffer.h     large allocations that fail without aborting
     function_ref.h    non-owning callback parameter
 tests/
-  test_util.h/.cpp    CHECK(), temporary folders, files with known contents
-  server_fixture.h/.cpp runs the server in a thread for the tests
+  test_util.h/.cpp    CHECK(), CHECK_EQ(), temp_dir, files with known contents
+  server_fixture.h/.cpp test_server: the server in a thread for the tests
   test_archive.cpp    the .crls format, versions 2 and 3
   test_append.cpp     signed uploads without a network
   test_httpmsg.cpp    the HTTP parser, including malformed requests

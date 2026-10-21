@@ -28,7 +28,7 @@ static pthread_t thread;
 static server_config cfg;
 static std::atomic<bool> stop_flag(false);
 static char port_file[PATH_MAX];
-static int port = 0;
+static int bound_port = 0;
 
 /** @brief Thread body: runs the server until stop_flag is set. */
 #ifdef _WIN32
@@ -45,12 +45,12 @@ static void* server_thread(void *arg){
 }
 #endif
 
-int start_test_server(const char *dir){
+test_server::test_server(const char *dir){
   net_init();
   path_in(port_file, "server.port");
   remove(port_file);
   stop_flag = false;
-  port = 0;
+  bound_port = 0;
   cfg = server_config();
   cfg.dir = dir;
   cfg.port = 0;
@@ -63,21 +63,24 @@ int start_test_server(const char *dir){
 #else
   pthread_create(&thread, NULL, server_thread, NULL);
 #endif
-  for(int i = 0; i < 200 && port == 0; i++){
+  for(int i = 0; i < 200 && bound_port == 0; i++){
     FILE *f = fopen(port_file, "r");
     if(f){
-      if(fscanf(f, "%d", &port) != 1) port = 0;
+      if(fscanf(f, "%d", &bound_port) != 1) bound_port = 0;
       fclose(f);
     }
-    if(port == 0) usleep(20000);
+    if(bound_port == 0) usleep(20000);
   }
-  return port;
 }
 
-void stop_test_server(void){
+int test_server::port() const noexcept{
+  return bound_port;
+}
+
+test_server::~test_server(){
   /* accept() is blocking: set the flag, then wake it up with a connection. */
   stop_flag = true;
-  unique_socket s = net_connect("127.0.0.1", port);
+  unique_socket s = net_connect("127.0.0.1", bound_port);
   if(s){
     net_send_all(s.get(), "HEAD / HTTP/1.1\r\n\r\n", 19);
     char buf[256];

@@ -31,18 +31,19 @@ int make_dir(const char *path){
 #endif
 }
 
-bool make_temp_dir(void){
+temp_dir::temp_dir(){
 #ifdef _WIN32
   const char *base = getenv("TEMP");
   snprintf(test_dir, sizeof(test_dir), "%s\\file-encryptor-test-XXXXXX", base ? base : ".");
-  return _mktemp(test_dir) != NULL && make_dir(test_dir) == 0;
+  created_ = _mktemp(test_dir) != NULL && make_dir(test_dir) == 0;
 #else
   snprintf(test_dir, sizeof(test_dir), "/tmp/file-encryptor-test-XXXXXX");
-  return mkdtemp(test_dir) != NULL;
+  created_ = mkdtemp(test_dir) != NULL;
 #endif
 }
 
-void remove_temp_dir(void){
+temp_dir::~temp_dir(){
+  if(!created_) return;
   char cmd[PATH_MAX + 16];
 #ifdef _WIN32
   snprintf(cmd, sizeof(cmd), "rmdir /s /q \"%s\"", test_dir);
@@ -93,7 +94,7 @@ bool same_files(const char *a, const char *b){
   return same;
 }
 
-int test_summary(void){
+int test_summary(){
   if(failures) printf("%d check(s) failed\n", failures);
   else printf("All tests passed\n");
   return failures ? 1 : 0;

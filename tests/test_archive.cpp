@@ -28,7 +28,7 @@ using namespace crls;
 static void check_extract_all(archive *a, const char *out_name){
   char out[PATH_MAX];
   path_in(out, out_name);
-  CHECK(make_dir(out) == 0);
+  CHECK_EQ(make_dir(out), 0);
   for(unsigned int i = 0; i < a->entries().size(); i++){
     const char *name = a->entries()[i].name.c_str();
     CHECK(a->extract(i, out) == extract_result::extracted);
@@ -72,14 +72,14 @@ static void check_v2_fixture(const char *fixtures){
   archive a;
   CHECK(!a.open(crls, "wrong-password"));
   CHECK(a.open(crls, "fixture-password"));
-  CHECK(a.entries().size() == 3);
+  CHECK_EQ(a.entries().size(), 3);
   if(a.entries().size() == 3){
-    CHECK(a.entries()[0].name == "empty.bin");
-    CHECK(a.entries()[1].name == "small.txt");
-    CHECK(a.entries()[2].name == "chunks.bin");
+    CHECK_EQ(a.entries()[0].name, "empty.bin");
+    CHECK_EQ(a.entries()[1].name, "small.txt");
+    CHECK_EQ(a.entries()[2].name, "chunks.bin");
   }
   CHECK(a.wasted_space() > 0);                /* The deleted file and the old indexes. */
-  CHECK(a.version() == 2);
+  CHECK_EQ(a.version(), 2);
   check_extract_all(&a, "out_v2");
 
   /* A version 2 archive can still be modified, and stays version 2... */
@@ -87,15 +87,15 @@ static void check_v2_fixture(const char *fixtures){
   make_file("added.bin", 70000, 5);
   path_in(file, "added.bin");
   CHECK(a.add_file(file));
-  CHECK(a.version() == 2);
+  CHECK_EQ(a.version(), 2);
 
   /* ...until it is compacted, which converts it to version 3. */
   CHECK(a.compact());
-  CHECK(a.version() == 3);
-  CHECK(a.wasted_space() == 0);
+  CHECK_EQ(a.version(), 3);
+  CHECK_EQ(a.wasted_space(), 0);
   a.close();
 
-  CHECK(header_version(crls) == 3);
+  CHECK_EQ(header_version(crls), 3);
   CHECK(!a.open(crls, "wrong-password"));
   CHECK(a.open(crls, "fixture-password"));
   CHECK(a.version() == 3 && a.entries().size() == 4);
@@ -140,7 +140,8 @@ int main(int argc, char **argv){
     return 2;
   }
   CHECK(archive_crypto_init());
-  CHECK(make_temp_dir());
+  temp_dir scratch;
+  CHECK(static_cast<bool>(scratch));
   check_v2_fixture(argv[1]);
 
   make_file("empty.bin", 0, 1);
@@ -164,33 +165,32 @@ int main(int argc, char **argv){
   path_in(file, "small.txt");
   CHECK(!a.add_file(file));                /* Duplicate name. */
   CHECK(!a.add_file(crls));                /* Itself. */
-  CHECK(a.entries().size() == 4);
+  CHECK_EQ(a.entries().size(), 4);
   CHECK(a.total_size() == 1000 + CHUNK + 3*CHUNK + 123);
   CHECK(a.version() == 3 && a.header_bytes() == V3_HEADER_BYTES);
   a.close();
-  CHECK(header_version(crls) == 3);
+  CHECK_EQ(header_version(crls), 3);
   check_header_tampering(crls, "password123");
 
   /* Reopen. */
   CHECK(!a.open(crls, "wrong-password"));
   CHECK(a.open(crls, "password123"));
-  CHECK(a.entries().size() == 4);
+  CHECK_EQ(a.entries().size(), 4);
   check_extract_all(&a, "out1");
 
   /* Delete leaves unused space; compact reclaims it. */
   CHECK(a.remove(1));
-  CHECK(a.entries().size() == 3);
-  CHECK(a.entries()[1].name == "exact.bin");
+  CHECK_EQ(a.entries().size(), 3);
+  CHECK_EQ(a.entries()[1].name, "exact.bin");
   CHECK(a.wasted_space() > 0);
   CHECK(a.compact());
-  CHECK(a.wasted_space() == 0);
+  CHECK_EQ(a.wasted_space(), 0);
   a.close();
 
   CHECK(a.open(crls, "password123"));
-  CHECK(a.entries().size() == 3);
+  CHECK_EQ(a.entries().size(), 3);
   check_extract_all(&a, "out2");
   a.close();
 
-  remove_temp_dir();
   return test_summary();
 }

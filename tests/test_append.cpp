@@ -77,10 +77,10 @@ static bool prepare(const char *crls, const char *password, const char *file, ap
 static void check_contents(const char *crls, const char **names, unsigned int count, const char *out){
   archive a;
   CHECK(a.open(crls, PASSWORD));
-  CHECK(a.entries().size() == count);
+  CHECK_EQ(a.entries().size(), count);
   char dir[PATH_MAX];
   path_in(dir, out);
-  CHECK(make_dir(dir) == 0);
+  CHECK_EQ(make_dir(dir), 0);
   for(unsigned int i = 0; i < a.entries().size() && i < count; i++){
     CHECK(a.entries()[i].name == names[i]);
     CHECK(a.extract(i, dir) == extract_result::extracted);
@@ -98,7 +98,8 @@ int main(int argc, char **argv){
     return 2;
   }
   CHECK(archive_crypto_init());
-  CHECK(make_temp_dir());
+  temp_dir scratch;
+  CHECK(static_cast<bool>(scratch));
 
   make_file("first.bin", 5000, 11);
   make_file("second.bin", 2*CHUNK + 7, 12);
@@ -169,7 +170,7 @@ int main(int argc, char **argv){
   CHECK(write_at(up.body_fd(), &byte, 1, 10));
   CHECK(serve(crls, &up) == append_result::bad_request);
   fd = open(crls, O_RDONLY | O_BINARY);
-  CHECK(file_size(fd) == size_before);
+  CHECK_EQ(file_size(fd), size_before);
   close(fd);
 
   /* An index length out of bounds is rejected before the signature. */
@@ -202,6 +203,5 @@ int main(int argc, char **argv){
   CHECK(!up.prepare(a, file));
   a.close();
 
-  remove_temp_dir();
   return test_summary();
 }

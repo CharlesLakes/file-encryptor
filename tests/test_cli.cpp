@@ -40,13 +40,14 @@ static int run_upload(const char *password, std::span<char *const> args){
   return cli_upload(args);
 }
 
-int main(void){
+int main(){
   CHECK(archive_crypto_init());
-  CHECK(make_temp_dir());
+  temp_dir scratch;
+  CHECK(static_cast<bool>(scratch));
 
   char served[PATH_MAX], crls[PATH_MAX], url[256], one[PATH_MAX], two[PATH_MAX];
   path_in(served, "served");
-  CHECK(make_dir(served) == 0);
+  CHECK_EQ(make_dir(served), 0);
   join_path(crls, sizeof(crls), served, "cli.crls");
   make_file("one.bin", 2000, 41);
   make_file("two.bin", 3000, 42);
@@ -57,39 +58,36 @@ int main(void){
   CHECK(a.create(crls, PASSWORD, 1, 8u << 20));
   a.close();
 
-  int port = start_test_server(served);
+  test_server server(served);
+  int port = server.port();
   CHECK(port > 0);
   snprintf(url, sizeof(url), "http://127.0.0.1:%d/cli.crls", port);
 
   /* argv is writable in C and C++, string literals are not. */
   char upload[] = "--upload";
   char *usage[] = {upload, url};
-  CHECK(cli_upload(usage) == 2);
+  CHECK_EQ(cli_upload(usage), 2);
 
   /* The wrong password opens nothing and uploads nothing. */
   char *args[] = {upload, url, one, two};
   int code = run_upload("not-the-password", args);
   if(strstr(status_text, "libcurl") != NULL){
     printf("SKIP: %s\n", status_text);
-    stop_test_server();
-    remove_temp_dir();
     return SKIP;
   }
-  CHECK(code == 1);
+  CHECK_EQ(code, 1);
 
   CHECK(run_upload(PASSWORD, args) == 0);
   /* Uploading the same names again fails for each file. */
   CHECK(run_upload(PASSWORD, args) == 1);
-  stop_test_server();
 
   CHECK(a.open(crls, PASSWORD));
-  CHECK(a.entries().size() == 2);
+  CHECK_EQ(a.entries().size(), 2);
   if(a.entries().size() == 2){
-    CHECK(a.entries()[0].name == "one.bin");
-    CHECK(a.entries()[1].name == "two.bin");
+    CHECK_EQ(a.entries()[0].name, "one.bin");
+    CHECK_EQ(a.entries()[1].name, "two.bin");
   }
   a.close();
 
-  remove_temp_dir();
   return test_summary();
 }
