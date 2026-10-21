@@ -122,33 +122,6 @@ typedef struct{
   int win_gravity;
 }XSizeHints;
 
-#define KeyPress          2
-#define ButtonPress       4
-#define Expose            12
-#define ConfigureNotify   22
-#define ClientMessage     33
-
-#define KeyPressMask      (1L << 0)
-#define ButtonPressMask   (1L << 2)
-#define ExposureMask      (1L << 15)
-#define StructureNotifyMask (1L << 17)
-
-#define PMinSize          (1L << 4)
-
-#define XK_BackSpace      0xff08
-#define XK_Tab            0xff09
-#define XK_Return         0xff0d
-#define XK_Escape         0xff1b
-#define XK_Home           0xff50
-#define XK_Up             0xff52
-#define XK_Down           0xff54
-#define XK_Page_Up        0xff55
-#define XK_Page_Down      0xff56
-#define XK_End            0xff57
-#define XK_KP_Enter       0xff8d
-#define XK_ISO_Left_Tab   0xfe20
-#define XK_Delete         0xffff
-
 Display*     XOpenDisplay(const char *name);
 int          XCloseDisplay(Display *dpy);
 int          XDefaultScreen(Display *dpy);
@@ -182,5 +155,34 @@ int          XLookupString(XKeyEvent *event, char *buffer, int size, KeySym *key
 int          XFlush(Display *dpy);
 
 }
+
+/* Constants of <X11/X.h> and <X11/keysymdef.h>. They are constants rather than
+   macros, so names such as KeyPress or Expose cannot clash with other code. */
+inline constexpr int KeyPress                = 2;
+inline constexpr int ButtonPress             = 4;
+inline constexpr int Expose                  = 12;
+inline constexpr int ConfigureNotify         = 22;
+inline constexpr int ClientMessage           = 33;
+
+inline constexpr long KeyPressMask           = 1L << 0;
+inline constexpr long ButtonPressMask        = 1L << 2;
+inline constexpr long ExposureMask           = 1L << 15;
+inline constexpr long StructureNotifyMask    = 1L << 17;
+
+inline constexpr long PMinSize               = 1L << 4;
+
+inline constexpr KeySym XK_BackSpace         = 0xff08;
+inline constexpr KeySym XK_Tab               = 0xff09;
+inline constexpr KeySym XK_Return            = 0xff0d;
+inline constexpr KeySym XK_Escape            = 0xff1b;
+inline constexpr KeySym XK_Home              = 0xff50;
+inline constexpr KeySym XK_Up                = 0xff52;
+inline constexpr KeySym XK_Down              = 0xff54;
+inline constexpr KeySym XK_Page_Up           = 0xff55;
+inline constexpr KeySym XK_Page_Down         = 0xff56;
+inline constexpr KeySym XK_End               = 0xff57;
+inline constexpr KeySym XK_KP_Enter          = 0xff8d;
+inline constexpr KeySym XK_ISO_Left_Tab      = 0xfe20;
+inline constexpr KeySym XK_Delete            = 0xffff;
 
 #endif
