@@ -19,13 +19,13 @@ void app_init(void){
   app.confirm_delete = -1;
   app.focus = FIELD_PATH;
   app.last_click_index = -1;
-  archive_init(&app.archive);
-  browser_init(&app.browser);
+  archive_init(&app.arc);
+  browser_init(&app.files);
 }
 
 void app_free(void){
-  archive_free(&app.archive);
-  browser_free(&app.browser);
+  archive_free(&app.arc);
+  browser_free(&app.files);
   clear_secrets();
 }
 
@@ -52,15 +52,15 @@ void list_rect(int *x, int *y, int *w, int *h){
 }
 
 int list_count(void){
-  return (int) (app.screen == SCREEN_ARCHIVE ? app.archive.entries.n : app.browser.items.n);
+  return (int) (app.screen == SCREEN_ARCHIVE ? app.arc.entries.n : app.files.items.n);
 }
 
 int* list_sel(void){
-  return app.screen == SCREEN_ARCHIVE ? &app.entry_sel : &app.browser.sel;
+  return app.screen == SCREEN_ARCHIVE ? &app.entry_sel : &app.files.sel;
 }
 
 int* list_scroll(void){
-  return app.screen == SCREEN_ARCHIVE ? &app.entry_scroll : &app.browser.scroll;
+  return app.screen == SCREEN_ARCHIVE ? &app.entry_scroll : &app.files.scroll;
 }
 
 int visible_rows(void){
@@ -109,7 +109,7 @@ int get_buttons(button *b){
     const char *label = layouts[app.screen][i].label;
     int action = layouts[app.screen][i].action;
     /* A remote archive only grows by uploads: deleting and compacting happen on the server. */
-    if(app.screen == SCREEN_ARCHIVE && app.archive.is_remote && (action == ACT_DELETE || action == ACT_COMPACT)) continue;
+    if(app.screen == SCREEN_ARCHIVE && app.arc.is_remote && (action == ACT_DELETE || action == ACT_COMPACT)) continue;
     b[count].label = label;
     b[count].action = layouts[app.screen][i].action;
     b[count].color = layouts[app.screen][i].color;

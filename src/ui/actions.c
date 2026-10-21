@@ -32,7 +32,7 @@ void clear_secrets(void){
  */
 static void resolve_field_path(char *out, size_t out_size){
   if(remote_is_url(app.path_field) || fs_is_absolute(app.path_field)) snprintf(out, out_size, "%s", app.path_field);
-  else join_path(out, out_size, app.browser.dir, app.path_field);
+  else join_path(out, out_size, app.files.dir, app.path_field);
 }
 
 /**
@@ -44,8 +44,8 @@ static void resolve_field_path(char *out, size_t out_size){
 static void go_to(int new_screen, int filter){
   app.screen = new_screen;
   if(new_screen != SCREEN_ARCHIVE){
-    app.browser.filter = filter;
-    browser_load(&app.browser);
+    app.files.filter = filter;
+    browser_load(&app.files);
   }
   clamp_scroll();
 }
@@ -54,9 +54,9 @@ static void go_to(int new_screen, int filter){
  * @brief On SCREEN_OPEN, copies the path of the selected file to the path field.
  */
 static void on_browser_select(void){
-  if(app.screen != SCREEN_OPEN || app.browser.sel < 0) return;
-  dir_item *item = browser_get_item(&app.browser, (unsigned int) app.browser.sel);
-  if(!item->is_dir) join_path(app.path_field, sizeof(app.path_field), app.browser.dir, item->name);
+  if(app.screen != SCREEN_OPEN || app.files.sel < 0) return;
+  dir_item *item = browser_get_item(&app.files, (unsigned int) app.files.sel);
+  if(!item->is_dir) join_path(app.path_field, sizeof(app.path_field), app.files.dir, item->name);
 }
 
 /* ---------------- Actions ---------------- */
@@ -81,13 +81,13 @@ static void open_archive(void){
   set_status(false, remote ? "Downloading the index and deriving the key..." : "Deriving the key...");
   draw();
 
-  if(remote ? !remote_open(&app.archive, path, app.password_field)
-            : !archive_open(&app.archive, path, app.password_field)) return;
+  if(remote ? !remote_open(&app.arc, path, app.password_field)
+            : !archive_open(&app.arc, path, app.password_field)) return;
   clear_secrets();
-  unsigned int n = app.archive.entries.n;
+  unsigned int n = app.arc.entries.n;
   app.entry_sel = n ? 0 : -1;
   app.entry_scroll = 0;
-  go_to(SCREEN_ARCHIVE, app.browser.filter);
+  go_to(SCREEN_ARCHIVE, app.files.filter);
   set_status(false, "Archive opened: %u file%s.", n, n == 1 ? "" : "s");
 }
 
@@ -128,12 +128,12 @@ static void create_archive(void){
   set_status(false, "Deriving the key...");
   draw();
 
-  if(!archive_create(&app.archive, path, app.password_field)) return;
+  if(!archive_create(&app.arc, path, app.password_field)) return;
   clear_secrets();
   app.entry_sel = -1;
   app.entry_scroll = 0;
-  go_to(SCREEN_ARCHIVE, app.browser.filter);
-  set_status(false, "Created %s.", app.archive.path);
+  go_to(SCREEN_ARCHIVE, app.files.filter);
+  set_status(false, "Created %s.", app.arc.path);
 }
 
 /**
@@ -141,37 +141,37 @@ static void create_archive(void){
  */
 static void extract_to_current_dir(void){
   unsigned int from = app.extract_all ? 0 : (unsigned int) app.entry_sel;
-  unsigned int to = app.extract_all ? app.archive.entries.n : (unsigned int) app.entry_sel + 1;
+  unsigned int to = app.extract_all ? app.arc.entries.n : (unsigned int) app.entry_sel + 1;
   int done = 0, skipped = 0, failed = 0;
 
   for(unsigned int i = from; i < to; i++){
-    int result = archive_extract_entry(&app.archive, i, app.browser.dir);
+    int result = archive_extract_entry(&app.arc, i, app.files.dir);
     if(result > 0) done++;
     else if(result == 0) skipped++;
     else failed++;
   }
 
   if(failed) return;
-  if(skipped) set_status(true, "Extracted %d. Skipped %d that already existed in %s.", done, skipped, app.browser.dir);
-  else set_status(false, "Extracted %d file%s into %s.", done, done == 1 ? "" : "s", app.browser.dir);
+  if(skipped) set_status(true, "Extracted %d. Skipped %d that already existed in %s.", done, skipped, app.files.dir);
+  else set_status(false, "Extracted %d file%s into %s.", done, done == 1 ? "" : "s", app.files.dir);
 }
 
 /**
  * @brief Deletes the selected entry. The first call only requests confirmation.
  */
 static void delete_selected(void){
-  if(app.archive.is_remote){
+  if(app.arc.is_remote){
     set_status(true, "Files cannot be deleted from a remote archive.");
   }else if(app.entry_sel < 0){
     set_status(true, "Select the file you want to delete.");
   }else if(app.confirm_delete != app.entry_sel){
     app.confirm_delete = app.entry_sel;
     set_status(true, "Press Delete again to remove %s from the .crls.",
-               archive_get_entry(&app.archive, (unsigned int) app.entry_sel)->name);
+               archive_get_entry(&app.arc, (unsigned int) app.entry_sel)->name);
   }else{
     app.confirm_delete = -1;
-    if(archive_delete_entry(&app.archive, (unsigned int) app.entry_sel)){
-      if(app.entry_sel >= (int) app.archive.entries.n) app.entry_sel = (int) app.archive.entries.n - 1;
+    if(archive_delete_entry(&app.arc, (unsigned int) app.entry_sel)){
+      if(app.entry_sel >= (int) app.arc.entries.n) app.entry_sel = (int) app.arc.entries.n - 1;
       clamp_scroll();
     }
   }
@@ -181,11 +181,11 @@ static void delete_selected(void){
  * @brief Compacts the archive if it contains unused space.
  */
 static void compact(void){
-  if(app.archive.is_remote){
+  if(app.arc.is_remote){
     set_status(true, "A remote archive can only be compacted on the server.");
     return;
   }
-  uint64_t wasted = archive_wasted_space(&app.archive);
+  uint64_t wasted = archive_wasted_space(&app.arc);
   if(wasted == 0){
     set_status(false, "There is no unused space.");
     return;
@@ -194,8 +194,8 @@ static void compact(void){
   draw();
   char wasted_text[32];
   format_size(wasted, wasted_text, sizeof(wasted_text));
-  if(archive_compact(&app.archive)) set_status(false, "Compacted: reclaimed %s.", wasted_text);
-  else if(!app.archive.is_open) app.screen = SCREEN_OPEN;
+  if(archive_compact(&app.arc)) set_status(false, "Compacted: reclaimed %s.", wasted_text);
+  else if(!app.arc.is_open) app.screen = SCREEN_OPEN;
 }
 
 /**
@@ -211,22 +211,22 @@ static void pick_confirm(void){
     return;
   }
 
-  if(app.browser.sel < 0){
+  if(app.files.sel < 0){
     set_status(true, "Select a file.");
     return;
   }
-  dir_item *item = browser_get_item(&app.browser, (unsigned int) app.browser.sel);
+  dir_item *item = browser_get_item(&app.files, (unsigned int) app.files.sel);
   if(item->is_dir){
-    browser_enter(&app.browser, item->name);
+    browser_enter(&app.files, item->name);
     return;
   }
   char path[PATH_MAX];
-  join_path(path, sizeof(path), app.browser.dir, item->name);
-  bool remote = app.archive.is_remote;
+  join_path(path, sizeof(path), app.files.dir, item->name);
+  bool remote = app.arc.is_remote;
   set_status(false, remote ? "Encrypting and uploading %s..." : "Adding %s...", item->name);
   draw();
-  if(remote ? remote_add_file(&app.archive, path) : archive_add_file(&app.archive, path)){
-    app.entry_sel = (int) app.archive.entries.n - 1;
+  if(remote ? remote_add_file(&app.arc, path) : archive_add_file(&app.arc, path)){
+    app.entry_sel = (int) app.arc.entries.n - 1;
     app.screen = SCREEN_ARCHIVE;
     ensure_visible();
   }
@@ -252,7 +252,7 @@ void handle_action(int action){
         set_status(true, "Select the file you want to extract.");
         break;
       }
-      if(app.archive.entries.n == 0){
+      if(app.arc.entries.n == 0){
         set_status(true, "There are no files to extract.");
         break;
       }
@@ -267,7 +267,7 @@ void handle_action(int action){
       compact();
       break;
     case ACT_CLOSE:
-      archive_close(&app.archive);
+      archive_close(&app.arc);
       go_to(SCREEN_OPEN, FILTER_CRLS);
       set_status(false, "Archive closed.");
       break;
@@ -292,9 +292,9 @@ void activate_selection(void){
     return;
   }
 
-  dir_item *item = browser_get_item(&app.browser, (unsigned int) sel);
+  dir_item *item = browser_get_item(&app.files, (unsigned int) sel);
   if(item->is_dir){
-    browser_enter(&app.browser, item->name);
+    browser_enter(&app.files, item->name);
   }else if(app.screen == SCREEN_OPEN){
     on_browser_select();
     app.focus = FIELD_PASSWORD;

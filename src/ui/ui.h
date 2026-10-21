@@ -111,8 +111,8 @@ typedef struct{
  */
 typedef struct{
   int screen;                    /**< Current SCREEN_* value. */
-  archive archive;               /**< Currently open archive, if any. */
-  browser browser;               /**< Folder browser used by the browsing screens. */
+  archive arc;                   /**< Currently open archive, if any. */
+  browser files;                 /**< Folder browser used by the browsing screens. */
 
   bool extract_all;              /**< SCREEN_PICK_EXTRACT: all files or only the selected one. */
   int entry_sel, entry_scroll;   /**< Selection and scroll in SCREEN_ARCHIVE (-1 = none). */

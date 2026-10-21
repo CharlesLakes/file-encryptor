@@ -120,8 +120,8 @@ void handle_key(const ui_event *event){
     activate_selection();
   }else if(key == KEY_ESCAPE && app.screen != SCREEN_ARCHIVE){
     handle_action(ACT_PICK_CANCEL);
-  }else if(key == KEY_BACKSPACE && app.screen != SCREEN_ARCHIVE && !fs_is_root(app.browser.dir)){
-    browser_enter(&app.browser, "..");
+  }else if(key == KEY_BACKSPACE && app.screen != SCREEN_ARCHIVE && !fs_is_root(app.files.dir)){
+    browser_enter(&app.files, "..");
   }else if(key == KEY_DELETE && app.screen == SCREEN_ARCHIVE){
     handle_action(ACT_DELETE);
   }

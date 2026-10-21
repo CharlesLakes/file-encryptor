@@ -104,14 +104,14 @@ static void draw_list(void){
     else if(r % 2) fill(x, row_y, w, ROW_H, COLOR_ROW_ALT);
 
     if(app.screen == SCREEN_ARCHIVE){
-      archive_entry *e = archive_get_entry(&app.archive, (unsigned int) i);
+      archive_entry *e = archive_get_entry(&app.arc, (unsigned int) i);
       char size_text[32];
       format_size(e->size, size_text, sizeof(size_text));
       int size_w = text_width(FONT_REGULAR, size_text);
       draw_text_fit(FONT_REGULAR, x + 12, row_y + text_y, w - size_w - 48, e->name, false, COLOR_TEXT);
       draw_text(FONT_REGULAR, x + w - size_w - 20, row_y + text_y, size_text, COLOR_MUTED);
     }else{
-      dir_item *item = browser_get_item(&app.browser, (unsigned int) i);
+      dir_item *item = browser_get_item(&app.files, (unsigned int) i);
       char label[MAX_NAME + 2];
       snprintf(label, sizeof(label), item->is_dir ? "%s/" : "%s", item->name);
       unsigned long color = item->is_dir ? COLOR_DIR : (has_crls_ext(item->name) ? COLOR_FILE : COLOR_TEXT);
@@ -183,7 +183,7 @@ static void draw_buttons(void){
  */
 static void draw_folder_line(void){
   char line[PATH_MAX + 16];
-  snprintf(line, sizeof(line), "Folder: %s", app.browser.dir);
+  snprintf(line, sizeof(line), "Folder: %s", app.files.dir);
   draw_text_fit(FONT_REGULAR, MARGIN, 60, platform_width() - 2*MARGIN, line, true, COLOR_MUTED);
 }
 
@@ -203,7 +203,7 @@ static void draw_open_screen(void){
  * @brief Draws SCREEN_ARCHIVE.
  */
 static void draw_archive_screen(void){
-  archive *a = &app.archive;
+  archive *a = &app.arc;
   draw_text_fit(FONT_TITLE, MARGIN, 34, platform_width() - 2*MARGIN, fs_basename(a->path), false, COLOR_TEXT);
   draw_text_fit(FONT_REGULAR, MARGIN, 58, platform_width() - 2*MARGIN, a->path, true, COLOR_MUTED);
 
