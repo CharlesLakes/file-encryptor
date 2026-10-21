@@ -12,26 +12,6 @@
 
 namespace crls{
 
-void app_init(app_state &app){
-  app.arc.close();
-  app.screen = ui_screen::open;
-  app.extract_all = false;
-  app.entry_sel = -1;
-  app.entry_scroll = 0;
-  app.confirm_delete = -1;
-  app.path_field[0] = '\0';
-  clear_secrets(app);
-  app.focus = ui_field::path;
-  app.last_click_time = 0;
-  app.last_click_index = -1;
-  app.files.open_cwd();
-}
-
-void app_free(app_state &app){
-  app.arc.close();
-  clear_secrets(app);
-}
-
 /* ---------------- Anchors ---------------- */
 
 int buttons_y(void){

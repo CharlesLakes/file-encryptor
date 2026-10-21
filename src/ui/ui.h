@@ -39,10 +39,10 @@
 #ifndef UI_UI_H
 #define UI_UI_H
 
-#include <stdbool.h>
-#include <limits.h>
+#include <string>
 #include "core/archive.h"
 #include "core/browser.h"
+#include "lib/secret.h"
 #include "ui/platform.h"
 
 namespace crls{
@@ -67,6 +67,7 @@ inline constexpr int FIELD_STEP     = 36;   /**< Vertical distance between field
 inline constexpr int FIELD_X        = 190;
 inline constexpr int FIELD_H        = 28;
 inline constexpr int MAX_BUTTONS    = 6;
+inline constexpr std::size_t MAX_PATH_FIELD = 4096;   /**< Longest text accepted in the path field. */
 
 /* ---------------- Colors (0xRRGGBB) ---------------- */
 
@@ -116,37 +117,29 @@ struct button{
  * @brief Application state shared by all UI modules.
  */
 struct app_state{
-  ui_screen screen;              /**< Current screen. */
-  archive arc;                   /**< Currently open archive, if any. */
-  browser files;                 /**< Folder browser used by the browsing screens. */
+  /** @brief Starts on ui_screen::open, browsing the current folder. */
+  app_state(){ files.open_cwd(); }
 
-  bool extract_all;              /**< ui_screen::pick_extract: all files or only the selected one. */
-  int entry_sel, entry_scroll;   /**< Selection and scroll in ui_screen::archive (-1 = none). */
-  int confirm_delete;            /**< Entry awaiting a second Delete press, or -1. */
+  ui_screen screen = ui_screen::open;    /**< Current screen. */
+  archive arc;                           /**< Currently open archive, if any (closed on destruction). */
+  browser files;                         /**< Folder browser used by the browsing screens. */
 
-  char path_field[PATH_MAX];     /**< Content of the path field. */
-  char password_field[MAX_PASSWORD + 1]; /**< Content of the password field. */
-  char confirm_field[MAX_PASSWORD + 1];  /**< Content of the confirmation field. */
-  ui_field focus;                /**< Field with keyboard focus. */
+  bool extract_all = false;              /**< ui_screen::pick_extract: all files or only the selected one. */
+  int entry_sel = -1;                    /**< Selection in ui_screen::archive (-1 = none). */
+  int entry_scroll = 0;                  /**< Scroll position in ui_screen::archive. */
+  int confirm_delete = -1;               /**< Entry awaiting a second Delete press, or -1. */
 
-  unsigned long last_click_time; /**< Time of the last click, for double-click detection. */
-  int last_click_index;          /**< Row of the last click, for double-click detection. */
+  std::string path_field;                /**< Content of the path field. */
+  secret_string<MAX_PASSWORD> password_field; /**< Content of the password field (wiped on destruction). */
+  secret_string<MAX_PASSWORD> confirm_field;  /**< Content of the confirmation field (wiped on destruction). */
+  ui_field focus = ui_field::path;       /**< Field with keyboard focus. */
+
+  unsigned long last_click_time = 0;     /**< Time of the last click, for double-click detection. */
+  int last_click_index = -1;             /**< Row of the last click, for double-click detection. */
 };
 
 
 /* ---------------- layout.cpp ---------------- */
-
-/**
- * @brief Initializes the application state on ui_screen::open.
- * @param app Application state.
- */
-void app_init(app_state &app);
-
-/**
- * @brief Releases the application state and wipes the password fields.
- * @param app Application state.
- */
-void app_free(app_state &app);
 
 /**
  * @brief  Returns the top coordinate of the button row.

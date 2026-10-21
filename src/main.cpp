@@ -83,11 +83,7 @@ int main(int argc, char **argv){
 
   /* The whole state of the GUI; it lives until the window is closed. */
   app_state app;
-  app_init(app);
-  if(!platform_open(MIN_WIDTH, MIN_HEIGHT, ".crls manager", COLOR_BG)){
-    app_free(app);
-    return 1;
-  }
+  if(!platform_open(MIN_WIDTH, MIN_HEIGHT, ".crls manager", COLOR_BG)) return 1;
   auto repaint = [&app]{ redraw(app); };
   platform_set_redraw(repaint);
 
@@ -105,7 +101,6 @@ int main(int argc, char **argv){
   }
 
   platform_set_redraw({});
-  app_free(app);
   platform_close();
   return 0;
 }

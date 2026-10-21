@@ -85,16 +85,14 @@ void handle_click(app_state &app, const ui_event *event){
  * @param erase True to delete the last character instead.
  */
 static void edit_field(app_state &app, char c, bool erase){
-  char *field = app.focus == ui_field::path ? app.path_field
-              : app.focus == ui_field::password ? app.password_field : app.confirm_field;
-  size_t max = app.focus == ui_field::path ? sizeof(app.path_field) - 1 : MAX_PASSWORD;
-  size_t len = strlen(field);
-  if(erase){
-    if(len) field[len-1] = '\0';
-  }else if(len < max){
-    field[len] = c;
-    field[len+1] = '\0';
+  if(app.focus == ui_field::path){
+    if(erase && !app.path_field.empty()) app.path_field.pop_back();
+    else if(!erase && app.path_field.size() < MAX_PATH_FIELD) app.path_field += c;
+    return;
   }
+  secret_string<MAX_PASSWORD> &field = app.focus == ui_field::password ? app.password_field : app.confirm_field;
+  if(erase) field.pop_back();
+  else field.push_back(c);
 }
 
 void handle_key(app_state &app, const ui_event *event){

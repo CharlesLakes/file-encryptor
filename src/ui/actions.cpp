@@ -21,8 +21,8 @@ namespace crls{
 /* ---------------- Helpers ---------------- */
 
 void clear_secrets(app_state &app){
-  sodium_memzero(app.password_field, sizeof(app.password_field));
-  sodium_memzero(app.confirm_field, sizeof(app.confirm_field));
+  app.password_field.wipe();
+  app.confirm_field.wipe();
 }
 
 /**
@@ -59,7 +59,7 @@ static void go_to(app_state &app, ui_screen new_screen, browser_filter filter){
 static void on_browser_select(app_state &app){
   if(app.screen != ui_screen::open || app.files.sel < 0) return;
   const dir_item *item = &app.files.items()[app.files.sel];
-  if(!item->is_dir) snprintf(app.path_field, sizeof(app.path_field), "%s", join_path(app.files.dir(), item->name).c_str());
+  if(!item->is_dir) app.path_field = join_path(app.files.dir(), item->name);
 }
 
 /* ---------------- Actions ---------------- */
@@ -69,11 +69,11 @@ static void on_browser_select(app_state &app){
  * @param app Application state.
  */
 static void open_archive(app_state &app){
-  if(app.path_field[0] == '\0'){
+  if(app.path_field.empty()){
     set_status(true, "Choose or type the path of a .crls file.");
     return;
   }
-  if(app.password_field[0] == '\0'){
+  if(app.password_field.empty()){
     set_status(true, "Type the password.");
     app.focus = ui_field::password;
     return;
@@ -84,8 +84,8 @@ static void open_archive(app_state &app){
   set_status(false, remote ? "Downloading the index and deriving the key..." : "Deriving the key...");
   draw(app);
 
-  if(remote ? !remote_open(app.arc, path, app.password_field)
-            : !app.arc.open(path, app.password_field)) return;
+  if(remote ? !remote_open(app.arc, path, app.password_field.c_str())
+            : !app.arc.open(path, app.password_field.c_str())) return;
   clear_secrets(app);
   unsigned int n = app.arc.entries().size();
   app.entry_sel = n ? 0 : -1;
@@ -99,7 +99,7 @@ static void open_archive(app_state &app){
  * @param app Application state.
  */
 static void create_archive(app_state &app){
-  if(app.path_field[0] == '\0'){
+  if(app.path_field.empty()){
     set_status(true, "Type the name of the new .crls file.");
     app.focus = ui_field::path;
     return;
@@ -113,12 +113,12 @@ static void create_archive(app_state &app){
   std::string path = resolve_field_path(app);
   if(!has_crls_ext(path)) path += ".crls";
 
-  if(strlen(app.password_field) < MIN_PASSWORD){
+  if(app.password_field.size() < MIN_PASSWORD){
     set_status(true, "The password must have at least %zu characters.", MIN_PASSWORD);
     app.focus = ui_field::password;
     return;
   }
-  if(strcmp(app.password_field, app.confirm_field) != 0){
+  if(app.password_field.view() != app.confirm_field.view()){
     set_status(true, "The confirmation does not match the password.");
     app.focus = ui_field::confirm;
     return;
@@ -131,7 +131,7 @@ static void create_archive(app_state &app){
   set_status(false, "Deriving the key...");
   draw(app);
 
-  if(!app.arc.create(path, app.password_field)) return;
+  if(!app.arc.create(path, app.password_field.c_str())) return;
   clear_secrets(app);
   app.entry_sel = -1;
   app.entry_scroll = 0;

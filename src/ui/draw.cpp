@@ -137,7 +137,7 @@ static void draw_list(app_state &app){
  * @param value  Field content.
  * @param secret True to mask the content with asterisks.
  */
-static void draw_field(app_state &app, ui_field index, const char *label, const char *value, bool secret){
+static void draw_field(app_state &app, ui_field index, const char *label, std::string_view value, bool secret){
   int x, y, w, h;
   field_rect(index, &x, &y, &w, &h);
   int text_y = y + (h + platform_font_ascent(ui_font::regular) - platform_font_descent(ui_font::regular)) / 2;
@@ -146,19 +146,12 @@ static void draw_field(app_state &app, ui_field index, const char *label, const 
   fill(x, y, w, h, COLOR_PANEL);
   platform_draw_rect(x, y, w, h, app.focus == index ? COLOR_FOCUS : COLOR_BORDER);
 
-  char shown[PATH_MAX];
-  if(secret){
-    size_t len = strlen(value);
-    memset(shown, '*', len);
-    shown[len] = '\0';
-  }else{
-    snprintf(shown, sizeof(shown), "%s", value);
-  }
-  draw_text_fit(ui_font::regular, x + 8, text_y, w - 24, shown, true, COLOR_TEXT);
+  /* A secret field only shows how many characters it holds. */
+  std::string shown = secret ? std::string(value.size(), '*') : std::string(value);
+  draw_text_fit(ui_font::regular, x + 8, text_y, w - 24, shown.c_str(), true, COLOR_TEXT);
 
   if(app.focus == index){
-    int len = (int) strlen(shown);
-    int cursor_x = x + 8 + platform_text_width(ui_font::regular, shown, len);
+    int cursor_x = x + 8 + text_width(ui_font::regular, shown.c_str());
     if(cursor_x > x + w - 14) cursor_x = x + w - 14;
     fill(cursor_x + 1, y + 6, 2, h - 12, COLOR_FOCUS);
   }
@@ -201,8 +194,8 @@ static void draw_open_screen(app_state &app){
   draw_folder_line(app);
   draw_list(app);
   draw_field(app, ui_field::path, ".crls file or URL", app.path_field, false);
-  draw_field(app, ui_field::password, "Password", app.password_field, true);
-  draw_field(app, ui_field::confirm, "Confirm (create)", app.confirm_field, true);
+  draw_field(app, ui_field::password, "Password", app.password_field.view(), true);
+  draw_field(app, ui_field::confirm, "Confirm (create)", app.confirm_field.view(), true);
 }
 
 /**

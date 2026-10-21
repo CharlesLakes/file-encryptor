@@ -84,6 +84,16 @@ int main(){
   CHECK(password.data()[0] == '\0' && password.data()[6] == '\0');
   check_secret_wipe();
 
+  /* secret_string: grows and shrinks in place, up to its capacity. */
+  crls::secret_string<4> typed;
+  CHECK(typed.empty() && typed.c_str()[0] == '\0');
+  for(char c : std::string_view("abcde")) typed.push_back(c);
+  CHECK(typed.view() == "abcd" && typed.size() == 4 && typed.c_str()[4] == '\0');
+  typed.pop_back();
+  CHECK(typed.view() == "abc" && typed.c_str()[3] == '\0');
+  typed.wipe();
+  CHECK(typed.empty() && typed.c_str()[0] == '\0');
+
   /* heap_buffer: zeroed contents, move, and failure without aborting. */
   crls::heap_buffer buf;
   CHECK(buf.allocate(1000) && buf.size() == 1000 && buf.data()[999] == 0);
