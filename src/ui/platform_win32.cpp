@@ -22,31 +22,38 @@
 
 #include "ui/platform.h"
 
-#include <string.h>
+#include <array>
+#include <cstddef>
+#include <optional>
 #include <windows.h>
 
 namespace crls{
+
+/** @brief Name of the registered window class. */
+static constexpr char CLASS_NAME[] = "FileEncryptorWindow";
 
 /**
  * @brief Win32 resources of the window. Everything created is released by
  *        release(), also when platform_open() fails halfway.
  */
 struct win32_state{
-  HWND win = NULL;                           /**< Main window. */
-  HDC buffer = NULL;                         /**< Memory device context of the off-screen buffer. */
-  HBITMAP bitmap = NULL;                     /**< Bitmap selected into buffer. */
-  HGDIOBJ old_bitmap = NULL;                 /**< Bitmap originally selected into buffer. */
+  HINSTANCE instance = nullptr;              /**< Module that registered the window class. */
+  bool class_registered = false;             /**< True once the window class is registered. */
+  HBRUSH background = nullptr;               /**< Background brush of the window class. */
+  HWND win = nullptr;                        /**< Main window. */
+  HDC buffer = nullptr;                      /**< Memory device context of the off-screen buffer. */
+  HBITMAP bitmap = nullptr;                  /**< Bitmap selected into buffer. */
+  HGDIOBJ old_bitmap = nullptr;              /**< Bitmap originally selected into buffer. */
   int width = 0, height = 0;                 /**< Size of the client area and the buffer. */
   int min_width = 0, min_height = 0;         /**< Minimum size of the client area. */
   function_ref<void()> redraw;               /**< Repaints the window during a resize. */
-  HFONT fonts[UI_FONT_COUNT] = {};           /**< Loaded fonts, indexed by ui_font. */
-  TEXTMETRICA metrics[UI_FONT_COUNT] = {};   /**< Metrics of each font. */
-  ui_event pending;                          /**< Event waiting to be returned. */
-  bool has_pending = false;                  /**< True if pending holds an event. */
+  std::array<HFONT, UI_FONT_COUNT> fonts{};  /**< Loaded fonts, indexed by ui_font. */
+  std::array<TEXTMETRICA, UI_FONT_COUNT> metrics{}; /**< Metrics of each font. */
+  std::optional<ui_event> pending;           /**< Event waiting to be returned, if any. */
 
   ~win32_state(){ release(); }
 
-  /** @brief Frees every resource that exists. */
+  /** @brief Frees every resource that exists, in reverse order of creation. */
   void release() noexcept{
     if(buffer){
       SelectObject(buffer, old_bitmap);
@@ -56,14 +63,17 @@ struct win32_state{
     for(HFONT f : fonts)
       if(f) DeleteObject(f);
     if(win) DestroyWindow(win);
+    /* The class uses the brush, so it goes first. */
+    if(class_registered) UnregisterClassA(CLASS_NAME, instance);
+    if(background) DeleteObject(background);
     *this = win32_state();
   }
 
   /** @brief The font for a ui_font value. */
-  HFONT font(ui_font f) const noexcept{ return fonts[static_cast<int>(f)]; }
+  HFONT font(ui_font f) const noexcept{ return fonts[static_cast<std::size_t>(f)]; }
 
   /** @brief The metrics of a ui_font value. */
-  const TEXTMETRICA& metric(ui_font f) const noexcept{ return metrics[static_cast<int>(f)]; }
+  const TEXTMETRICA& metric(ui_font f) const noexcept{ return metrics[static_cast<std::size_t>(f)]; }
 
   win32_state() = default;
   win32_state& operator=(const win32_state &) = default;
@@ -71,8 +81,42 @@ struct win32_state{
 
 static win32_state w32;
 
-/** @brief Name of the registered window class. */
-static const char CLASS_NAME[] = "FileEncryptorWindow";
+/**
+ * @brief The device context of a window, released when it goes out of scope.
+ */
+class window_dc{
+public:
+  explicit window_dc(HWND win) noexcept : win_(win), dc_(GetDC(win)) {}
+  ~window_dc(){ if(dc_) ReleaseDC(win_, dc_); }
+
+  window_dc(const window_dc &) = delete;
+  window_dc& operator=(const window_dc &) = delete;
+
+  /** @brief The device context, or nullptr if GetDC() failed. */
+  HDC get() const noexcept{ return dc_; }
+
+private:
+  HWND win_;
+  HDC dc_;
+};
+
+/**
+ * @brief A solid GDI brush, deleted when it goes out of scope.
+ */
+class solid_brush{
+public:
+  explicit solid_brush(COLORREF color) noexcept : brush_(CreateSolidBrush(color)) {}
+  ~solid_brush(){ if(brush_) DeleteObject(brush_); }
+
+  solid_brush(const solid_brush &) = delete;
+  solid_brush& operator=(const solid_brush &) = delete;
+
+  /** @brief The brush. */
+  HBRUSH get() const noexcept{ return brush_; }
+
+private:
+  HBRUSH brush_;
+};
 
 /**
  * @brief  Converts a 0xRRGGBB color into a GDI COLORREF (0x00BBGGRR).
@@ -87,9 +131,8 @@ static COLORREF to_colorref(unsigned long color){
  * @brief Stores an event for platform_next_event(), replacing any older one.
  * @param event Event.
  */
-static void post_event(const ui_event *event){
-  w32.pending = *event;
-  w32.has_pending = true;
+static void post_event(const ui_event &event){
+  w32.pending = event;
 }
 
 /**
@@ -100,9 +143,7 @@ static void post_event(const ui_event *event){
  * @return True on success, false otherwise (the old buffer is kept).
  */
 static bool resize_buffer(int width, int height){
-  HDC dc = GetDC(w32.win);
-  HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
-  ReleaseDC(w32.win, dc);
+  HBITMAP bitmap = CreateCompatibleBitmap(window_dc(w32.win).get(), width, height);
   if(!bitmap) return false;
   SelectObject(w32.buffer, bitmap);
   DeleteObject(w32.bitmap);
@@ -113,19 +154,17 @@ static bool resize_buffer(int width, int height){
 }
 
 /**
- * @brief Grows the outer size of the window so that its client area is
- *        width x height pixels.
- * @param style  Window style.
- * @param width  Client area width.
- * @param height Client area height.
- * @param out_w  Output: outer width.
- * @param out_h  Output: outer height.
+ * @brief  Computes the outer size of a window whose client area is
+ *         width x height pixels.
+ * @param  style  Window style.
+ * @param  width  Client area width.
+ * @param  height Client area height.
+ * @return Outer width and height.
  */
-static void outer_size(DWORD style, int width, int height, int *out_w, int *out_h){
-  RECT r = {0, 0, width, height};
+static SIZE outer_size(DWORD style, int width, int height){
+  RECT r{0, 0, width, height};
   AdjustWindowRect(&r, style, FALSE);
-  *out_w = r.right - r.left;
-  *out_h = r.bottom - r.top;
+  return SIZE{r.right - r.left, r.bottom - r.top};
 }
 
 /**
@@ -168,18 +207,17 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
       if(w32.buffer) BitBlt(dc, 0, 0, w32.width, w32.height, w32.buffer, 0, 0, SRCCOPY);
       EndPaint(hwnd, &ps);
       event.type = ui_event_type::expose;
-      post_event(&event);
+      post_event(event);
       return 0;
     }
     case WM_ERASEBKGND:
       /* The whole client area is covered by the buffer. */
       return 1;
     case WM_GETMINMAXINFO:{
-      MINMAXINFO *info = (MINMAXINFO *) lparam;
-      int w, h;
-      outer_size((DWORD) GetWindowLongA(hwnd, GWL_STYLE), w32.min_width, w32.min_height, &w, &h);
-      info->ptMinTrackSize.x = w;
-      info->ptMinTrackSize.y = h;
+      MINMAXINFO *info = reinterpret_cast<MINMAXINFO *>(lparam);
+      SIZE min = outer_size(static_cast<DWORD>(GetWindowLongA(hwnd, GWL_STYLE)), w32.min_width, w32.min_height);
+      info->ptMinTrackSize.x = min.cx;
+      info->ptMinTrackSize.y = min.cy;
       return 0;
     }
     case WM_SIZE:{
@@ -189,33 +227,34 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
       if(resize_buffer(w, h)){
         if(w32.redraw) w32.redraw();
         event.type = ui_event_type::resize;
-        post_event(&event);
+        post_event(event);
       }
       return 0;
     }
     case WM_LBUTTONDOWN:
       event.type = ui_event_type::click;
-      event.x = (short) LOWORD(lparam);
-      event.y = (short) HIWORD(lparam);
-      event.time = (unsigned long) GetMessageTime();
-      post_event(&event);
+      /* The coordinates are signed 16-bit values. */
+      event.x = static_cast<short>(LOWORD(lparam));
+      event.y = static_cast<short>(HIWORD(lparam));
+      event.time = static_cast<unsigned long>(GetMessageTime());
+      post_event(event);
       return 0;
     case WM_MOUSEWHEEL:{
       /* Wheel messages carry screen coordinates. */
-      POINT p = {(short) LOWORD(lparam), (short) HIWORD(lparam)};
+      POINT p{static_cast<short>(LOWORD(lparam)), static_cast<short>(HIWORD(lparam))};
       ScreenToClient(hwnd, &p);
       event.type = ui_event_type::wheel;
       event.x = p.x;
       event.y = p.y;
       event.wheel = GET_WHEEL_DELTA_WPARAM(wparam) > 0 ? -1 : 1;
-      post_event(&event);
+      post_event(event);
       return 0;
     }
     case WM_KEYDOWN:
       event.key = translate_key(wparam);
       if(event.key != ui_key::none){
         event.type = ui_event_type::key;
-        post_event(&event);
+        post_event(event);
         return 0;
       }
       break;
@@ -223,14 +262,14 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
       if(wparam >= 32 && wparam < 127){
         event.type = ui_event_type::key;
         event.key = ui_key::character;
-        event.ch = (char) wparam;
-        post_event(&event);
+        event.ch = static_cast<char>(wparam);
+        post_event(event);
       }
       return 0;
     case WM_CLOSE:
       /* The window is destroyed by platform_close(), not here. */
       event.type = ui_event_type::quit;
-      post_event(&event);
+      post_event(event);
       return 0;
   }
   return DefWindowProcA(hwnd, msg, wparam, lparam);
@@ -244,7 +283,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
  * @return True on success, false otherwise.
  */
 static bool load_font(ui_font font, int height, int weight){
-  int index = static_cast<int>(font);
+  std::size_t index = static_cast<std::size_t>(font);
   w32.fonts[index] = CreateFontA(height, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                                  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                  FIXED_PITCH | FF_MODERN, "Consolas");
@@ -254,37 +293,40 @@ static bool load_font(ui_font font, int height, int weight){
 }
 
 bool platform_open(int width, int height, const char *title, unsigned long background){
-  HINSTANCE instance = GetModuleHandleA(NULL);
-  WNDCLASSA wc;
-  memset(&wc, 0, sizeof(wc));
+  w32.instance = GetModuleHandleA(nullptr);
+  w32.background = CreateSolidBrush(to_colorref(background));
+  WNDCLASSA wc{};
   wc.lpfnWndProc = window_proc;
-  wc.hInstance = instance;
-  wc.hCursor = LoadCursorA(NULL, (LPCSTR) IDC_ARROW);
-  wc.hbrBackground = CreateSolidBrush(to_colorref(background));
+  wc.hInstance = w32.instance;
+  wc.hCursor = LoadCursorA(nullptr, IDC_ARROW);
+  wc.hbrBackground = w32.background;
   wc.lpszClassName = CLASS_NAME;
-  if(!RegisterClassA(&wc)){
+  w32.class_registered = RegisterClassA(&wc) != 0;
+  if(!w32.class_registered){
     platform_error("Could not register the window class.");
+    w32.release();
     return false;
   }
 
   DWORD style = WS_OVERLAPPEDWINDOW;
-  int outer_w, outer_h;
-  outer_size(style, width, height, &outer_w, &outer_h);
+  SIZE outer = outer_size(style, width, height);
   w32.min_width = width;
   w32.min_height = height;
   w32.win = CreateWindowExA(0, CLASS_NAME, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
-                            outer_w, outer_h, NULL, NULL, instance, NULL);
+                            outer.cx, outer.cy, nullptr, nullptr, w32.instance, nullptr);
   if(!w32.win){
     platform_error("Could not create the window.");
+    w32.release();
     return false;
   }
 
-  HDC dc = GetDC(w32.win);
   w32.width = width;
   w32.height = height;
-  w32.buffer = CreateCompatibleDC(dc);
-  w32.bitmap = CreateCompatibleBitmap(dc, width, height);
-  ReleaseDC(w32.win, dc);
+  {
+    window_dc dc(w32.win);
+    w32.buffer = CreateCompatibleDC(dc.get());
+    w32.bitmap = CreateCompatibleBitmap(dc.get(), width, height);
+  }
   if(!w32.buffer || !w32.bitmap){
     platform_error("Could not create the drawing buffer.");
     w32.release();
@@ -323,36 +365,33 @@ void platform_close(){
 }
 
 void platform_error(const char *message){
-  MessageBoxA(NULL, message, "FileEncryptor", MB_OK | MB_ICONERROR);
+  MessageBoxA(nullptr, message, "FileEncryptor", MB_OK | MB_ICONERROR);
 }
 
-void platform_next_event(ui_event *event){
-  while(!w32.has_pending){
+ui_event platform_next_event(){
+  while(!w32.pending){
     MSG msg;
-    if(GetMessageA(&msg, NULL, 0, 0) <= 0){
-      *event = ui_event();
-      event->type = ui_event_type::quit;
-      return;
+    if(GetMessageA(&msg, nullptr, 0, 0) <= 0){
+      ui_event quit;
+      quit.type = ui_event_type::quit;
+      return quit;
     }
     TranslateMessage(&msg);
     DispatchMessageA(&msg);
   }
-  *event = w32.pending;
-  w32.has_pending = false;
+  ui_event event = *w32.pending;
+  w32.pending.reset();
+  return event;
 }
 
 void platform_fill_rect(int x, int y, int w, int h, unsigned long color){
-  RECT r = {x, y, x + w, y + h};
-  HBRUSH brush = CreateSolidBrush(to_colorref(color));
-  FillRect(w32.buffer, &r, brush);
-  DeleteObject(brush);
+  RECT r{x, y, x + w, y + h};
+  FillRect(w32.buffer, &r, solid_brush(to_colorref(color)).get());
 }
 
 void platform_draw_rect(int x, int y, int w, int h, unsigned long color){
-  RECT r = {x, y, x + w, y + h};
-  HBRUSH brush = CreateSolidBrush(to_colorref(color));
-  FrameRect(w32.buffer, &r, brush);
-  DeleteObject(brush);
+  RECT r{x, y, x + w, y + h};
+  FrameRect(w32.buffer, &r, solid_brush(to_colorref(color)).get());
 }
 
 void platform_draw_text(ui_font font, int x, int baseline, std::string_view s, unsigned long color){
@@ -376,9 +415,7 @@ int platform_font_descent(ui_font font){
 }
 
 void platform_present(){
-  HDC dc = GetDC(w32.win);
-  BitBlt(dc, 0, 0, w32.width, w32.height, w32.buffer, 0, 0, SRCCOPY);
-  ReleaseDC(w32.win, dc);
+  BitBlt(window_dc(w32.win).get(), 0, 0, w32.width, w32.height, w32.buffer, 0, 0, SRCCOPY);
 }
 
 }

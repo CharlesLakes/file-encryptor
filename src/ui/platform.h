@@ -91,18 +91,18 @@ void platform_set_redraw(function_ref<void()> redraw);
  * @brief  Returns the current width of the client area and the buffer.
  * @return Width in pixels.
  */
-int  platform_width(void);
+int  platform_width();
 
 /**
  * @brief  Returns the current height of the client area and the buffer.
  * @return Height in pixels.
  */
-int  platform_height(void);
+int  platform_height();
 
 /**
  * @brief Releases every windowing system resource.
  */
-void platform_close(void);
+void platform_close();
 
 /**
  * @brief Reports a fatal error to the user (standard error or a message box).
@@ -111,10 +111,10 @@ void platform_close(void);
 void platform_error(const char *message);
 
 /**
- * @brief Waits for the next event.
- * @param event Output: the event received.
+ * @brief  Waits for the next event.
+ * @return The event received.
  */
-void platform_next_event(ui_event *event);
+ui_event platform_next_event();
 
 /**
  * @brief Fills a rectangle with a solid color.
@@ -171,7 +171,7 @@ int  platform_font_descent(ui_font font);
 /**
  * @brief Copies the off-screen buffer to the window.
  */
-void platform_present(void);
+void platform_present();
 
 }
 

@@ -89,8 +89,7 @@ int main(int argc, char **argv){
 
   bool running = true;
   while(running){
-    ui_event event;
-    platform_next_event(&event);
+    ui_event event = platform_next_event();
 
     if(event.type == ui_event_type::click || event.type == ui_event_type::wheel) handle_click(app, event);
     else if(event.type == ui_event_type::key) handle_key(app, event);

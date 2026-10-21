@@ -11,9 +11,11 @@
 
 #include "ui/platform.h"
 
+#include <array>
 #include <cstddef>
-#include <stdio.h>
-#include <string.h>
+#include <cstdio>
+#include <cstring>
+#include <span>
 #include "deps/xlib.h"
 
 namespace crls{
@@ -42,7 +44,7 @@ struct x11_state{
   GC gc = nullptr;                           /**< Graphics context. */
   int width = 0, height = 0;                 /**< Size of the buffer. */
   unsigned int depth = 0;                    /**< Color depth of the screen. */
-  XFontStruct *fonts[UI_FONT_COUNT] = {};    /**< Loaded fonts, indexed by ui_font. */
+  std::array<XFontStruct *, UI_FONT_COUNT> fonts{}; /**< Loaded fonts, indexed by ui_font. */
 
   ~x11_state(){ release(); }
 
@@ -61,7 +63,7 @@ struct x11_state{
   }
 
   /** @brief The font for a ui_font value. */
-  XFontStruct* font(ui_font f) const noexcept{ return fonts[static_cast<int>(f)]; }
+  XFontStruct* font(ui_font f) const noexcept{ return fonts[static_cast<std::size_t>(f)]; }
 
   x11_state() = default;
   x11_state& operator=(const x11_state &) = default;
@@ -69,17 +71,39 @@ struct x11_state{
 
 x11_state x11;
 
+/** @brief Font names for each ui_font, in order of preference. */
+constexpr std::array<std::array<const char *, 3>, UI_FONT_COUNT> FONT_NAMES = {{
+  {"9x15", "fixed", "fixed"},
+  {"9x15bold", "9x15", "fixed"},
+  {"10x20", "9x15bold", "fixed"},
+}};
+
 /**
  * @brief  Loads the first available font from a list.
- * @param  names NULL-terminated list of font names, in order of preference.
- * @return The loaded font, or NULL if none is available.
+ * @param  names Font names, in order of preference.
+ * @return The loaded font, or nullptr if none is available.
  */
-XFontStruct* load_font(const char *const *names){
-  for(int i = 0; names[i]; i++){
-    XFontStruct *f = XLoadQueryFont(x11.dpy, names[i]);
-    if(f) return f;
+XFontStruct* load_font(std::span<const char *const> names){
+  for(const char *name : names){
+    if(XFontStruct *f = XLoadQueryFont(x11.dpy, name)) return f;
   }
-  return NULL;
+  return nullptr;
+}
+
+/**
+ * @brief  Copies the member of an XEvent that its type selects. The union is
+ *         filled by C code, so the member is copied out instead of being
+ *         read through the union.
+ * @tparam T Event structure, e.g. XButtonEvent.
+ * @param  xe Event.
+ * @return The copy.
+ */
+template<class T>
+T event_as(const XEvent &xe){
+  static_assert(sizeof(T) <= sizeof(XEvent), "the event structure must fit in XEvent");
+  T out;
+  std::memcpy(&out, &xe, sizeof(out));
+  return out;
 }
 
 /**
@@ -109,19 +133,14 @@ ui_key translate_key(KeySym sym){
 }
 
 bool platform_open(int width, int height, const char *title, unsigned long background){
-  x11.dpy = XOpenDisplay(NULL);
+  x11.dpy = XOpenDisplay(nullptr);
   if(!x11.dpy){
     platform_error("Could not open the X11 display.");
     return false;
   }
 
-  static const char *const names[UI_FONT_COUNT][4] = {
-    {"9x15", "fixed", NULL},
-    {"9x15bold", "9x15", "fixed", NULL},
-    {"10x20", "9x15bold", "fixed", NULL},
-  };
-  for(int i = 0; i < UI_FONT_COUNT; i++){
-    x11.fonts[i] = load_font(names[i]);
+  for(std::size_t i = 0; i < x11.fonts.size(); i++){
+    x11.fonts[i] = load_font(FONT_NAMES[i]);
     if(!x11.fonts[i]){
       platform_error("Could not load an X11 font.");
       x11.release();
@@ -138,8 +157,7 @@ bool platform_open(int width, int height, const char *title, unsigned long backg
   XStoreName(x11.dpy, x11.win, title);
   XSelectInput(x11.dpy, x11.win, ExposureMask | KeyPressMask | ButtonPressMask | StructureNotifyMask);
 
-  XSizeHints hints;
-  memset(&hints, 0, sizeof(hints));
+  XSizeHints hints{};
   hints.flags = PMinSize;
   hints.min_width = width;
   hints.min_height = height;
@@ -149,14 +167,13 @@ bool platform_open(int width, int height, const char *title, unsigned long backg
   XSetWMProtocols(x11.dpy, x11.win, &x11.wm_delete, 1);
   x11.buffer = XCreatePixmap(x11.dpy, x11.win, static_cast<unsigned int>(width), static_cast<unsigned int>(height),
                              x11.depth);
-  x11.gc = XCreateGC(x11.dpy, x11.win, 0, NULL);
+  x11.gc = XCreateGC(x11.dpy, x11.win, 0, nullptr);
   XMapWindow(x11.dpy, x11.win);
   return true;
 }
 
-void platform_set_redraw(function_ref<void()> redraw){
+void platform_set_redraw(function_ref<void()>){
   /* X11 always returns events, so main() repaints after ui_event_type::resize. */
-  (void) redraw;
 }
 
 int platform_width(){
@@ -172,58 +189,63 @@ void platform_close(){
 }
 
 void platform_error(const char *message){
-  fprintf(stderr, "%s\n", message);
+  std::fprintf(stderr, "%s\n", message);
 }
 
-void platform_next_event(ui_event *event){
+ui_event platform_next_event(){
   XEvent xe;
   XNextEvent(x11.dpy, &xe);
-  *event = ui_event();
+  ui_event event;
 
-  /* Each case copies the member of the union that the event type selects. */
-  if(xe.type == Expose){
-    event->type = ui_event_type::expose;
-  }else if(xe.type == ConfigureNotify){
-    XConfigureEvent c;
-    memcpy(&c, &xe, sizeof(c));
-    /* Also sent when the window only moves. */
-    if(c.width != x11.width || c.height != x11.height){
-      XFreePixmap(x11.dpy, x11.buffer);
-      x11.buffer = XCreatePixmap(x11.dpy, x11.win, static_cast<unsigned int>(c.width),
-                                 static_cast<unsigned int>(c.height), x11.depth);
-      x11.width = c.width;
-      x11.height = c.height;
-      event->type = ui_event_type::resize;
+  switch(xe.type){
+    case Expose:
+      event.type = ui_event_type::expose;
+      break;
+    case ConfigureNotify:{
+      XConfigureEvent c = event_as<XConfigureEvent>(xe);
+      /* Also sent when the window only moves. */
+      if(c.width != x11.width || c.height != x11.height){
+        XFreePixmap(x11.dpy, x11.buffer);
+        x11.buffer = XCreatePixmap(x11.dpy, x11.win, static_cast<unsigned int>(c.width),
+                                   static_cast<unsigned int>(c.height), x11.depth);
+        x11.width = c.width;
+        x11.height = c.height;
+        event.type = ui_event_type::resize;
+      }
+      break;
     }
-  }else if(xe.type == ButtonPress){
-    XButtonEvent b;
-    memcpy(&b, &xe, sizeof(b));
-    event->x = b.x;
-    event->y = b.y;
-    event->time = b.time;
-    /* Buttons 4 and 5 correspond to the mouse wheel. */
-    if(b.button == 1) event->type = ui_event_type::click;
-    else if(b.button == 4 || b.button == 5){
-      event->type = ui_event_type::wheel;
-      event->wheel = b.button == 4 ? -1 : 1;
+    case ButtonPress:{
+      XButtonEvent b = event_as<XButtonEvent>(xe);
+      event.x = b.x;
+      event.y = b.y;
+      event.time = b.time;
+      /* Buttons 4 and 5 correspond to the mouse wheel. */
+      if(b.button == 1) event.type = ui_event_type::click;
+      else if(b.button == 4 || b.button == 5){
+        event.type = ui_event_type::wheel;
+        event.wheel = b.button == 4 ? -1 : 1;
+      }
+      break;
     }
-  }else if(xe.type == KeyPress){
-    XKeyEvent k;
-    memcpy(&k, &xe, sizeof(k));
-    char text[8];
-    KeySym sym;
-    int n = XLookupString(&k, text, sizeof(text), &sym, NULL);
-    event->key = translate_key(sym);
-    if(event->key == ui_key::none && n == 1 && text[0] >= 32 && text[0] < 127){
-      event->key = ui_key::character;
-      event->ch = text[0];
+    case KeyPress:{
+      XKeyEvent k = event_as<XKeyEvent>(xe);
+      std::array<char, 8> text{};
+      KeySym sym = 0;
+      int n = XLookupString(&k, text.data(), static_cast<int>(text.size()), &sym, nullptr);
+      event.key = translate_key(sym);
+      if(event.key == ui_key::none && n == 1 && text[0] >= 32 && text[0] < 127){
+        event.key = ui_key::character;
+        event.ch = text[0];
+      }
+      if(event.key != ui_key::none) event.type = ui_event_type::key;
+      break;
     }
-    if(event->key != ui_key::none) event->type = ui_event_type::key;
-  }else if(xe.type == ClientMessage){
-    XClientMessageEvent m;
-    memcpy(&m, &xe, sizeof(m));
-    if(static_cast<Atom>(m.data.l[0]) == x11.wm_delete) event->type = ui_event_type::quit;
+    case ClientMessage:
+      if(static_cast<Atom>(event_as<XClientMessageEvent>(xe).data.l[0]) == x11.wm_delete)
+        event.type = ui_event_type::quit;
+      break;
   }
+  return event;
 }
 
 void platform_fill_rect(int x, int y, int w, int h, unsigned long color){
