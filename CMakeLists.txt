@@ -142,3 +142,7 @@ add_executable(test-cli tests/test_cli.cpp)
 target_link_libraries(test-cli PRIVATE server_fixture crls_cli)
 add_test(NAME cli COMMAND test-cli)
 set_tests_properties(cli PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(test-lib tests/test_lib.cpp)
+target_link_libraries(test-lib PRIVATE test_util)
+add_test(NAME lib COMMAND test-lib)

@@ -1,0 +1,104 @@
+/**
+ * @file    test_lib.cpp
+ * @brief   Tests of the basic C++ types in src/lib/.
+ * @author  @CharlesLakes
+ *
+ * Maintainer: @CharlesLakes
+ */
+
+#include <cstdint>
+#include <cstring>
+#include <new>
+#include <utility>
+#include <fcntl.h>
+#include "core/archive.h"
+#include "core/fs.h"
+#include "lib/function_ref.h"
+#include "lib/heap_buffer.h"
+#include "lib/secret.h"
+#include "lib/unique_fd.h"
+#include "test_util.h"
+
+/**
+ * @brief  Calls f with every value from 1 to n and returns the sum of the
+ *         results, as a callback-taking function would.
+ * @param  n Number of calls.
+ * @param  f Callback.
+ * @return Sum of the results.
+ */
+static int sum_calls(int n, crls::function_ref<int(int)> f){
+  int total = 0;
+  for(int i = 1; i <= n; i++) total += f(i);
+  return total;
+}
+
+/**
+ * @brief Checks that the destructor of a secret wipes its bytes, by building
+ *        one inside a buffer of ours and looking at the buffer afterwards.
+ */
+static void check_secret_wipe(){
+  alignas(crls::secret<32>) unsigned char storage[sizeof(crls::secret<32>)];
+  auto *s = new (storage) crls::secret<32>();
+  std::memset(s->data(), 0xAB, s->size());
+  CHECK(s->data()[31] == 0xAB);
+  s->~basic_secret();
+  bool zero = true;
+  for(unsigned char c : storage) zero = zero && c == 0;
+  CHECK(zero);
+}
+
+int main(){
+  CHECK(archive_crypto_init());
+  CHECK(make_temp_dir());
+
+  /* unique_fd: ownership, move and release. */
+  char path[PATH_MAX];
+  path_in(path, "file.bin");
+  make_file("file.bin", 100, 1);
+  {
+    crls::unique_fd fd(open(path, O_RDONLY | O_BINARY));
+    CHECK(static_cast<bool>(fd));
+    CHECK(file_size(fd.get()) == 100);
+    crls::unique_fd moved(std::move(fd));
+    CHECK(!fd && moved);
+    int raw = moved.release();
+    CHECK(!moved && raw >= 0);
+    crls::unique_fd again(raw);
+    again.reset();
+    CHECK(!again);
+  }
+  crls::unique_fd empty;
+  CHECK(!empty && empty.get() == -1);
+
+  /* secret: zero-initialized, wiped on request and on destruction. */
+  crls::secret_text<16> password;
+  CHECK(password.data()[0] == '\0' && password.size() == 16);
+  std::strcpy(password.data(), "hunter2");
+  password.wipe();
+  CHECK(password.data()[0] == '\0' && password.data()[6] == '\0');
+  check_secret_wipe();
+
+  /* heap_buffer: zeroed contents, move, and failure without aborting. */
+  crls::heap_buffer buf;
+  CHECK(buf.allocate(1000) && buf.size() == 1000 && buf.data()[999] == 0);
+  buf.data()[0] = 7;
+  crls::heap_buffer other(std::move(buf));
+  CHECK(buf.size() == 0 && buf.data() == nullptr && other.size() == 1000 && other.data()[0] == 7);
+  CHECK(other.allocate(0) && other.size() == 0 && other.data() != nullptr);
+  CHECK(!other.allocate(SIZE_MAX / 2) && other.size() == 0);
+  crls::secret_buffer key;
+  CHECK(key.allocate(32) && key.span().size() == 32);
+
+  /* function_ref: calls the lambda it refers to, which keeps its state. */
+  int calls = 0;
+  auto square = [&](int x){
+    calls++;
+    return x * x;
+  };
+  CHECK(sum_calls(3, square) == 1 + 4 + 9 && calls == 3);
+  crls::function_ref<int(int)> none;
+  CHECK(!none);
+
+  remove_temp_dir();
+  return test_summary();
+}

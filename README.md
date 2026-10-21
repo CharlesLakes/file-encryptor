@@ -171,7 +171,11 @@ src/
     xlib.h            used only by platform_x11.cpp
     sodium.h
     curl.h            used only by http_curl.cpp
-  lib/
+  lib/                basic C++ types, header only
+    unique_fd.h       file descriptor closed on destruction
+    secret.h          fixed buffers for keys and passwords, wiped on destruction
+    heap_buffer.h     large allocations that fail without aborting
+    function_ref.h    non-owning callback parameter
     vector.h/.cpp     generic dynamic array (copied from EDDs-in-C)
 tests/
   test_util.h/.cpp    CHECK(), temporary folders, files with known contents
@@ -182,6 +186,7 @@ tests/
   test_server.cpp     the server over real sockets
   test_remote.cpp     URL reading and uploading against the server (needs libcurl)
   test_cli.cpp        --upload (needs libcurl)
+  test_lib.cpp        the types in src/lib/
   fixtures/v2.crls    archive written by the version 2 format (compatibility test)
 ```
 
