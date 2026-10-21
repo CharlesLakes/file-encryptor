@@ -259,13 +259,13 @@ void clear_secrets(void);
 
 /**
  * @brief Handles a mouse click or wheel event.
- * @param event EVENT_CLICK or EVENT_WHEEL event.
+ * @param event ui_event_type::click or ui_event_type::wheel event.
  */
 void handle_click(const ui_event *event);
 
 /**
  * @brief Handles a key press.
- * @param event EVENT_KEY event.
+ * @param event ui_event_type::key event.
  */
 void handle_key(const ui_event *event);
 

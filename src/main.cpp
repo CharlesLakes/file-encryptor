@@ -92,12 +92,12 @@ int main(int argc, char **argv){
     ui_event event;
     platform_next_event(&event);
 
-    if(event.type == EVENT_CLICK || event.type == EVENT_WHEEL) handle_click(&event);
-    else if(event.type == EVENT_KEY) handle_key(&event);
-    else if(event.type == EVENT_QUIT) running = false;
+    if(event.type == ui_event_type::click || event.type == ui_event_type::wheel) handle_click(&event);
+    else if(event.type == ui_event_type::key) handle_key(&event);
+    else if(event.type == ui_event_type::quit) running = false;
 
-    if(event.type == EVENT_RESIZE) redraw();
-    else if(running && event.type != EVENT_NONE) draw();
+    if(event.type == ui_event_type::resize) redraw();
+    else if(running && event.type != ui_event_type::none) draw();
   }
 
   app_free();

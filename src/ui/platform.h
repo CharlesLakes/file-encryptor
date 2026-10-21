@@ -18,7 +18,7 @@
  *
  * All drawing goes to an off-screen buffer as large as the client area of the
  * window, which platform_present() copies to the window. The buffer follows
- * the window when it is resized (EVENT_RESIZE). Colors are 0xRRGGBB values.
+ * the window when it is resized (ui_event_type::resize). Colors are 0xRRGGBB values.
  */
 
 #ifndef UI_PLATFORM_H
@@ -29,36 +29,38 @@
 namespace crls{
 
 /** @brief Fonts available to the user interface. */
-enum{ FONT_REGULAR, FONT_BOLD, FONT_TITLE, FONT_COUNT };
+enum class ui_font{ regular, bold, title };
+
+inline constexpr int UI_FONT_COUNT = 3;   /**< Number of ui_font values. */
 
 /** @brief Kinds of events delivered by platform_next_event(). */
-enum{
-  EVENT_NONE,                /**< Nothing relevant happened. */
-  EVENT_EXPOSE,              /**< The window must be repainted. */
-  EVENT_CLICK,               /**< Left mouse button pressed. */
-  EVENT_WHEEL,               /**< Mouse wheel turned. */
-  EVENT_KEY,                 /**< Key pressed. */
-  EVENT_RESIZE,              /**< The client area changed size; see platform_width(). */
-  EVENT_QUIT                 /**< The user asked to close the window. */
+enum class ui_event_type{
+  none,                      /**< Nothing relevant happened. */
+  expose,                    /**< The window must be repainted. */
+  click,                     /**< Left mouse button pressed. */
+  wheel,                     /**< Mouse wheel turned. */
+  key,                       /**< Key pressed. */
+  resize,                    /**< The client area changed size; see platform_width(). */
+  quit                       /**< The user asked to close the window. */
 };
 
 /** @brief Keys recognized by the user interface. */
-enum{
-  KEY_NONE, KEY_CHAR, KEY_UP, KEY_DOWN, KEY_PAGE_UP, KEY_PAGE_DOWN, KEY_HOME, KEY_END,
-  KEY_TAB, KEY_BACK_TAB, KEY_ENTER, KEY_ESCAPE, KEY_BACKSPACE, KEY_DELETE
+enum class ui_key{
+  none, character, up, down, page_up, page_down, home, end,
+  tab, back_tab, enter, escape, backspace, del
 };
 
 /**
  * @brief Input event in a windowing system independent form.
  */
-typedef struct{
-  int type;                  /**< EVENT_* value. */
-  int x, y;                  /**< Pointer position (EVENT_CLICK, EVENT_WHEEL). */
-  int wheel;                 /**< Wheel direction: -1 up, +1 down (EVENT_WHEEL). */
-  unsigned long time;        /**< Time stamp in milliseconds (EVENT_CLICK). */
-  int key;                   /**< KEY_* value (EVENT_KEY). */
-  char ch;                   /**< Printable ASCII character (KEY_CHAR). */
-}ui_event;
+struct ui_event{
+  ui_event_type type = ui_event_type::none; /**< Kind of event. */
+  int x = 0, y = 0;                         /**< Pointer position (click, wheel). */
+  int wheel = 0;                            /**< Wheel direction: -1 up, +1 down (wheel). */
+  unsigned long time = 0;                   /**< Time stamp in milliseconds (click). */
+  ui_key key = ui_key::none;                /**< Key (key). */
+  char ch = 0;                              /**< Printable ASCII character (ui_key::character). */
+};
 
 /**
  * @brief  Creates and shows a resizable window with a client area of
@@ -134,37 +136,37 @@ void platform_draw_rect(int x, int y, int w, int h, unsigned long color);
 
 /**
  * @brief Draws len characters of s.
- * @param font     FONT_* value.
+ * @param font     Font.
  * @param x        Left coordinate.
  * @param baseline Baseline coordinate.
  * @param s        String.
  * @param len      Number of characters.
  * @param color    Text color.
  */
-void platform_draw_text(int font, int x, int baseline, const char *s, int len, unsigned long color);
+void platform_draw_text(ui_font font, int x, int baseline, const char *s, int len, unsigned long color);
 
 /**
  * @brief  Measures the width of len characters of s.
- * @param  font FONT_* value.
+ * @param  font Font.
  * @param  s    String.
  * @param  len  Number of characters.
  * @return Width in pixels.
  */
-int  platform_text_width(int font, const char *s, int len);
+int  platform_text_width(ui_font font, const char *s, int len);
 
 /**
  * @brief  Returns the distance from the baseline to the top of the font.
- * @param  font FONT_* value.
+ * @param  font Font.
  * @return Ascent in pixels.
  */
-int  platform_font_ascent(int font);
+int  platform_font_ascent(ui_font font);
 
 /**
  * @brief  Returns the distance from the baseline to the bottom of the font.
- * @param  font FONT_* value.
+ * @param  font Font.
  * @return Descent in pixels.
  */
-int  platform_font_descent(int font);
+int  platform_font_descent(ui_font font);
 
 /**
  * @brief Copies the off-screen buffer to the window.

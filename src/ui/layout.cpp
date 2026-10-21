@@ -120,7 +120,7 @@ int get_buttons(button *b){
     b[count].color = layouts[static_cast<int>(app.screen)][i].color;
     b[count].x = x;
     b[count].y = buttons_y();
-    b[count].w = platform_text_width(FONT_BOLD, label, (int) strlen(label)) + 36;
+    b[count].w = platform_text_width(ui_font::bold, label, (int) strlen(label)) + 36;
     b[count].h = BUTTON_H;
     x += b[count].w + 10;
     count++;

@@ -27,20 +27,49 @@
 
 namespace crls{
 
-/** @brief Win32 resources of the window. */
-static struct{
-  HWND win;                      /**< Main window. */
-  HDC buffer;                    /**< Memory device context of the off-screen buffer. */
-  HBITMAP bitmap;                /**< Bitmap selected into buffer. */
-  HGDIOBJ old_bitmap;            /**< Bitmap originally selected into buffer. */
-  int width, height;             /**< Size of the client area and the buffer. */
-  int min_width, min_height;     /**< Minimum size of the client area. */
-  void (*redraw)(void);          /**< Repaints the window during a resize. */
-  HFONT fonts[FONT_COUNT];       /**< Loaded fonts, indexed by FONT_*. */
-  TEXTMETRICA metrics[FONT_COUNT]; /**< Metrics of each font. */
-  ui_event pending;              /**< Event waiting to be returned. */
-  bool has_pending;              /**< True if pending holds an event. */
-}w32;
+/**
+ * @brief Win32 resources of the window. Everything created is released by
+ *        release(), also when platform_open() fails halfway.
+ */
+struct win32_state{
+  HWND win = NULL;                           /**< Main window. */
+  HDC buffer = NULL;                         /**< Memory device context of the off-screen buffer. */
+  HBITMAP bitmap = NULL;                     /**< Bitmap selected into buffer. */
+  HGDIOBJ old_bitmap = NULL;                 /**< Bitmap originally selected into buffer. */
+  int width = 0, height = 0;                 /**< Size of the client area and the buffer. */
+  int min_width = 0, min_height = 0;         /**< Minimum size of the client area. */
+  void (*redraw)() = nullptr;                /**< Repaints the window during a resize. */
+  HFONT fonts[UI_FONT_COUNT] = {};           /**< Loaded fonts, indexed by ui_font. */
+  TEXTMETRICA metrics[UI_FONT_COUNT] = {};   /**< Metrics of each font. */
+  ui_event pending;                          /**< Event waiting to be returned. */
+  bool has_pending = false;                  /**< True if pending holds an event. */
+
+  ~win32_state(){ release(); }
+
+  /** @brief Frees every resource that exists. */
+  void release() noexcept{
+    if(buffer){
+      SelectObject(buffer, old_bitmap);
+      DeleteDC(buffer);
+    }
+    if(bitmap) DeleteObject(bitmap);
+    for(HFONT f : fonts)
+      if(f) DeleteObject(f);
+    if(win) DestroyWindow(win);
+    *this = win32_state();
+  }
+
+  /** @brief The font for a ui_font value. */
+  HFONT font(ui_font f) const noexcept{ return fonts[static_cast<int>(f)]; }
+
+  /** @brief The metrics of a ui_font value. */
+  const TEXTMETRICA& metric(ui_font f) const noexcept{ return metrics[static_cast<int>(f)]; }
+
+  win32_state() = default;
+  win32_state& operator=(const win32_state &) = default;
+};
+
+static win32_state w32;
 
 /** @brief Name of the registered window class. */
 static const char CLASS_NAME[] = "FileEncryptorWindow";
@@ -100,25 +129,25 @@ static void outer_size(DWORD style, int width, int height, int *out_w, int *out_
 }
 
 /**
- * @brief  Translates a virtual key code into a KEY_* value.
+ * @brief  Translates a virtual key code into a ui_key value.
  * @param  vk Virtual key code.
- * @return KEY_* value, or KEY_NONE if the key is not used.
+ * @return The key, or ui_key::none if the key is not used.
  */
-static int translate_key(WPARAM vk){
+static ui_key translate_key(WPARAM vk){
   switch(vk){
-    case VK_UP:     return KEY_UP;
-    case VK_DOWN:   return KEY_DOWN;
-    case VK_PRIOR:  return KEY_PAGE_UP;
-    case VK_NEXT:   return KEY_PAGE_DOWN;
-    case VK_HOME:   return KEY_HOME;
-    case VK_END:    return KEY_END;
-    case VK_TAB:    return GetKeyState(VK_SHIFT) < 0 ? KEY_BACK_TAB : KEY_TAB;
-    case VK_RETURN: return KEY_ENTER;
-    case VK_ESCAPE: return KEY_ESCAPE;
-    case VK_BACK:   return KEY_BACKSPACE;
-    case VK_DELETE: return KEY_DELETE;
+    case VK_UP:     return ui_key::up;
+    case VK_DOWN:   return ui_key::down;
+    case VK_PRIOR:  return ui_key::page_up;
+    case VK_NEXT:   return ui_key::page_down;
+    case VK_HOME:   return ui_key::home;
+    case VK_END:    return ui_key::end;
+    case VK_TAB:    return GetKeyState(VK_SHIFT) < 0 ? ui_key::back_tab : ui_key::tab;
+    case VK_RETURN: return ui_key::enter;
+    case VK_ESCAPE: return ui_key::escape;
+    case VK_BACK:   return ui_key::backspace;
+    case VK_DELETE: return ui_key::del;
   }
-  return KEY_NONE;
+  return ui_key::none;
 }
 
 /**
@@ -131,7 +160,6 @@ static int translate_key(WPARAM vk){
  */
 static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam){
   ui_event event;
-  memset(&event, 0, sizeof(event));
 
   switch(msg){
     case WM_PAINT:{
@@ -139,7 +167,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
       HDC dc = BeginPaint(hwnd, &ps);
       if(w32.buffer) BitBlt(dc, 0, 0, w32.width, w32.height, w32.buffer, 0, 0, SRCCOPY);
       EndPaint(hwnd, &ps);
-      event.type = EVENT_EXPOSE;
+      event.type = ui_event_type::expose;
       post_event(&event);
       return 0;
     }
@@ -160,13 +188,13 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
       if(!w32.buffer || w == 0 || h == 0 || (w == w32.width && h == w32.height)) return 0;
       if(resize_buffer(w, h)){
         if(w32.redraw) w32.redraw();
-        event.type = EVENT_RESIZE;
+        event.type = ui_event_type::resize;
         post_event(&event);
       }
       return 0;
     }
     case WM_LBUTTONDOWN:
-      event.type = EVENT_CLICK;
+      event.type = ui_event_type::click;
       event.x = (short) LOWORD(lparam);
       event.y = (short) HIWORD(lparam);
       event.time = (unsigned long) GetMessageTime();
@@ -176,7 +204,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
       /* Wheel messages carry screen coordinates. */
       POINT p = {(short) LOWORD(lparam), (short) HIWORD(lparam)};
       ScreenToClient(hwnd, &p);
-      event.type = EVENT_WHEEL;
+      event.type = ui_event_type::wheel;
       event.x = p.x;
       event.y = p.y;
       event.wheel = GET_WHEEL_DELTA_WPARAM(wparam) > 0 ? -1 : 1;
@@ -185,23 +213,23 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     }
     case WM_KEYDOWN:
       event.key = translate_key(wparam);
-      if(event.key != KEY_NONE){
-        event.type = EVENT_KEY;
+      if(event.key != ui_key::none){
+        event.type = ui_event_type::key;
         post_event(&event);
         return 0;
       }
       break;
     case WM_CHAR:
       if(wparam >= 32 && wparam < 127){
-        event.type = EVENT_KEY;
-        event.key = KEY_CHAR;
+        event.type = ui_event_type::key;
+        event.key = ui_key::character;
         event.ch = (char) wparam;
         post_event(&event);
       }
       return 0;
     case WM_CLOSE:
       /* The window is destroyed by platform_close(), not here. */
-      event.type = EVENT_QUIT;
+      event.type = ui_event_type::quit;
       post_event(&event);
       return 0;
   }
@@ -210,12 +238,13 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
 /**
  * @brief  Creates a monospaced font and reads its metrics.
- * @param  index  FONT_* value to fill.
+ * @param  font   Font to fill.
  * @param  height Character cell height in pixels.
  * @param  weight FW_NORMAL or FW_BOLD.
  * @return True on success, false otherwise.
  */
-static bool load_font(int index, int height, int weight){
+static bool load_font(ui_font font, int height, int weight){
+  int index = static_cast<int>(font);
   w32.fonts[index] = CreateFontA(height, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                                  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                  FIXED_PITCH | FF_MODERN, "Consolas");
@@ -258,15 +287,17 @@ bool platform_open(int width, int height, const char *title, unsigned long backg
   ReleaseDC(w32.win, dc);
   if(!w32.buffer || !w32.bitmap){
     platform_error("Could not create the drawing buffer.");
+    w32.release();
     return false;
   }
   w32.old_bitmap = SelectObject(w32.buffer, w32.bitmap);
   SetBkMode(w32.buffer, TRANSPARENT);
   SetTextAlign(w32.buffer, TA_BASELINE | TA_LEFT);
 
-  if(!load_font(FONT_REGULAR, 16, FW_NORMAL) || !load_font(FONT_BOLD, 16, FW_BOLD) ||
-     !load_font(FONT_TITLE, 21, FW_BOLD)){
+  if(!load_font(ui_font::regular, 16, FW_NORMAL) || !load_font(ui_font::bold, 16, FW_BOLD) ||
+     !load_font(ui_font::title, 21, FW_BOLD)){
     platform_error("Could not load a font.");
+    w32.release();
     return false;
   }
 
@@ -275,28 +306,20 @@ bool platform_open(int width, int height, const char *title, unsigned long backg
   return true;
 }
 
-void platform_set_redraw(void (*redraw)(void)){
+void platform_set_redraw(void (*redraw)()){
   w32.redraw = redraw;
 }
 
-int platform_width(void){
+int platform_width(){
   return w32.width;
 }
 
-int platform_height(void){
+int platform_height(){
   return w32.height;
 }
 
-void platform_close(void){
-  if(w32.buffer){
-    SelectObject(w32.buffer, w32.old_bitmap);
-    DeleteDC(w32.buffer);
-  }
-  if(w32.bitmap) DeleteObject(w32.bitmap);
-  for(int i = 0; i < FONT_COUNT; i++)
-    if(w32.fonts[i]) DeleteObject(w32.fonts[i]);
-  if(w32.win) DestroyWindow(w32.win);
-  memset(&w32, 0, sizeof(w32));
+void platform_close(){
+  w32.release();
 }
 
 void platform_error(const char *message){
@@ -307,8 +330,8 @@ void platform_next_event(ui_event *event){
   while(!w32.has_pending){
     MSG msg;
     if(GetMessageA(&msg, NULL, 0, 0) <= 0){
-      memset(event, 0, sizeof(*event));
-      event->type = EVENT_QUIT;
+      *event = ui_event();
+      event->type = ui_event_type::quit;
       return;
     }
     TranslateMessage(&msg);
@@ -332,27 +355,27 @@ void platform_draw_rect(int x, int y, int w, int h, unsigned long color){
   DeleteObject(brush);
 }
 
-void platform_draw_text(int font, int x, int baseline, const char *s, int len, unsigned long color){
-  SelectObject(w32.buffer, w32.fonts[font]);
+void platform_draw_text(ui_font font, int x, int baseline, const char *s, int len, unsigned long color){
+  SelectObject(w32.buffer, w32.font(font));
   SetTextColor(w32.buffer, to_colorref(color));
   TextOutA(w32.buffer, x, baseline, s, len);
 }
 
-int platform_text_width(int font, const char *s, int len){
+int platform_text_width(ui_font font, const char *s, int len){
   SIZE size;
-  SelectObject(w32.buffer, w32.fonts[font]);
+  SelectObject(w32.buffer, w32.font(font));
   return GetTextExtentPoint32A(w32.buffer, s, len, &size) ? size.cx : 0;
 }
 
-int platform_font_ascent(int font){
-  return w32.metrics[font].tmAscent;
+int platform_font_ascent(ui_font font){
+  return w32.metric(font).tmAscent;
 }
 
-int platform_font_descent(int font){
-  return w32.metrics[font].tmDescent;
+int platform_font_descent(ui_font font){
+  return w32.metric(font).tmDescent;
 }
 
-void platform_present(void){
+void platform_present(){
   HDC dc = GetDC(w32.win);
   BitBlt(dc, 0, 0, w32.width, w32.height, w32.buffer, 0, 0, SRCCOPY);
   ReleaseDC(w32.win, dc);

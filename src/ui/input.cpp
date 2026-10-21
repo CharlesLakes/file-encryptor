@@ -34,7 +34,7 @@ void handle_click(const ui_event *event){
   int lx, ly, lw, lh;
   list_rect(&lx, &ly, &lw, &lh);
 
-  if(event->type == EVENT_WHEEL){
+  if(event->type == ui_event_type::wheel){
     if(inside(px, py, lx, ly, lw, lh)){
       *list_scroll() += 3 * event->wheel;
       clamp_scroll();
@@ -96,37 +96,39 @@ static void edit_field(char c, bool erase){
 }
 
 void handle_key(const ui_event *event){
-  int key = event->key;
+  ui_key key = event->key;
 
   switch(key){
-    case KEY_UP:        move_selection(-1); return;
-    case KEY_DOWN:      move_selection(1); return;
-    case KEY_PAGE_UP:   move_selection(-visible_rows()); return;
-    case KEY_PAGE_DOWN: move_selection(visible_rows()); return;
-    case KEY_HOME:      move_selection(-list_count()); return;
-    case KEY_END:       move_selection(list_count()); return;
+    case ui_key::up:        move_selection(-1); return;
+    case ui_key::down:      move_selection(1); return;
+    case ui_key::page_up:   move_selection(-visible_rows()); return;
+    case ui_key::page_down: move_selection(visible_rows()); return;
+    case ui_key::home:      move_selection(-list_count()); return;
+    case ui_key::end:       move_selection(list_count()); return;
+    /* The other keys depend on the screen and are handled below. */
+    default:                break;
   }
 
   if(app.screen == ui_screen::open){
     int focus = static_cast<int>(app.focus);
-    if(key == KEY_TAB){ app.focus = static_cast<ui_field>((focus + 1) % UI_FIELD_COUNT); return; }
-    if(key == KEY_BACK_TAB){ app.focus = static_cast<ui_field>((focus + UI_FIELD_COUNT - 1) % UI_FIELD_COUNT); return; }
-    if(key == KEY_ENTER){
+    if(key == ui_key::tab){ app.focus = static_cast<ui_field>((focus + 1) % UI_FIELD_COUNT); return; }
+    if(key == ui_key::back_tab){ app.focus = static_cast<ui_field>((focus + UI_FIELD_COUNT - 1) % UI_FIELD_COUNT); return; }
+    if(key == ui_key::enter){
       handle_action(app.focus == ui_field::confirm ? ui_action::create : ui_action::open);
       return;
     }
-    if(key == KEY_BACKSPACE){ edit_field(0, true); return; }
-    if(key == KEY_CHAR) edit_field(event->ch, false);
+    if(key == ui_key::backspace){ edit_field(0, true); return; }
+    if(key == ui_key::character) edit_field(event->ch, false);
     return;
   }
 
-  if(key == KEY_ENTER){
+  if(key == ui_key::enter){
     activate_selection();
-  }else if(key == KEY_ESCAPE && app.screen != ui_screen::archive){
+  }else if(key == ui_key::escape && app.screen != ui_screen::archive){
     handle_action(ui_action::pick_cancel);
-  }else if(key == KEY_BACKSPACE && app.screen != ui_screen::archive && !fs_is_root(app.files.dir().c_str())){
+  }else if(key == ui_key::backspace && app.screen != ui_screen::archive && !fs_is_root(app.files.dir().c_str())){
     app.files.enter("..");
-  }else if(key == KEY_DELETE && app.screen == ui_screen::archive){
+  }else if(key == ui_key::del && app.screen == ui_screen::archive){
     handle_action(ui_action::remove);
   }
 }
