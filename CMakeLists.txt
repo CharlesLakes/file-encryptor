@@ -66,7 +66,7 @@ target_include_directories(crls_core PUBLIC src)
 target_compile_definitions(crls_core PUBLIC _DEFAULT_SOURCE ${PLATFORM_DEFS})
 # Errors are reported with set_status() and return values, never with
 # exceptions; nothing needs run-time type information either.
-target_compile_options(crls_core PUBLIC -Wall -Wextra -Wno-sign-compare -fno-exceptions -fno-rtti)
+target_compile_options(crls_core PUBLIC -Wall -Wextra -fno-exceptions -fno-rtti)
 # Link the C++ runtime statically on MinGW, so the executables only need
 # libsodium-26.dll next to them.
 if(MINGW)
