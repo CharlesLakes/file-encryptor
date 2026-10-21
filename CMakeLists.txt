@@ -28,17 +28,19 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ---------------- Platform ----------------
 
 if(WIN32)
-  set(FS_SRC  src/core/fs_win32.c)
+  set(OS_SRC  src/core/fs_win32.c src/core/net_win32.c)
   set(GUI_SRC src/ui/platform_win32.c)
   find_library(SODIUM_LIB NAMES sodium libsodium REQUIRED)
+  set(SYSTEM_LIBS ws2_32)
   set(GUI_LIBS gdi32 user32)
   set(PLATFORM_DEFS __USE_MINGW_ANSI_STDIO=1)
 else()
-  set(FS_SRC  src/core/fs_posix.c)
+  set(OS_SRC  src/core/fs_posix.c src/core/net_posix.c)
   set(GUI_SRC src/ui/platform_x11.c)
   # Link the runtime libraries by their exact file names.
   find_library(SODIUM_LIB NAMES libsodium.so.23 sodium REQUIRED)
   find_library(X11_LIB NAMES libX11.so.6 X11 REQUIRED)
+  set(SYSTEM_LIBS "")
   set(GUI_LIBS ${X11_LIB})
   set(PLATFORM_DEFS "")
 endif()
@@ -49,16 +51,17 @@ add_library(crls_core STATIC
   src/core/append.c
   src/core/archive.c
   src/core/browser.c
+  src/core/httpmsg.c
   src/core/source.c
   src/core/status.c
   src/core/util.c
-  ${FS_SRC}
+  ${OS_SRC}
   src/lib/vector.c
 )
 target_include_directories(crls_core PUBLIC src)
 target_compile_definitions(crls_core PUBLIC _DEFAULT_SOURCE ${PLATFORM_DEFS})
 target_compile_options(crls_core PUBLIC -Wall -Wextra -Wno-sign-compare)
-target_link_libraries(crls_core PUBLIC ${SODIUM_LIB})
+target_link_libraries(crls_core PUBLIC ${SODIUM_LIB} ${SYSTEM_LIBS})
 
 # ---------------- Program ----------------
 
@@ -86,3 +89,7 @@ add_test(NAME archive COMMAND test-archive ${CMAKE_CURRENT_SOURCE_DIR}/tests/fix
 add_executable(test-append tests/test_append.c)
 target_link_libraries(test-append PRIVATE test_util)
 add_test(NAME append COMMAND test-append ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
+
+add_executable(test-httpmsg tests/test_httpmsg.c)
+target_link_libraries(test-httpmsg PRIVATE test_util)
+add_test(NAME httpmsg COMMAND test-httpmsg)
