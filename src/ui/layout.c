@@ -29,14 +29,26 @@ void app_free(void){
   clear_secrets();
 }
 
+/* ---------------- Anchors ---------------- */
+
+int buttons_y(void){
+  return platform_height() - BUTTONS_BOTTOM;
+}
+
+int status_y(void){
+  return platform_height() - STATUS_BOTTOM;
+}
+
 /* ---------------- List ---------------- */
 
 void list_rect(int *x, int *y, int *w, int *h){
   *x = MARGIN;
-  *w = WIDTH - 2*MARGIN;
-  if(app.screen == SCREEN_OPEN){ *y = 72; *h = ROW_H*12; }
-  else if(app.screen == SCREEN_ARCHIVE){ *y = 92; *h = ROW_H*16; }
-  else{ *y = 72; *h = ROW_H*17; }
+  *w = platform_width() - 2*MARGIN;
+  *y = app.screen == SCREEN_ARCHIVE ? 92 : 72;
+  int bottom = (app.screen == SCREEN_OPEN ? buttons_y() - FIELDS_ABOVE : buttons_y()) - 16;
+  /* Whole rows only. */
+  *h = (bottom - *y) / ROW_H * ROW_H;
+  if(*h < ROW_H) *h = ROW_H;
 }
 
 int list_count(void){
@@ -76,8 +88,8 @@ void ensure_visible(void){
 
 void field_rect(int index, int *x, int *y, int *w, int *h){
   *x = FIELD_X;
-  *y = 352 + index*36;
-  *w = WIDTH - MARGIN - FIELD_X;
+  *y = buttons_y() - FIELDS_ABOVE + index*FIELD_STEP;
+  *w = platform_width() - MARGIN - FIELD_X;
   *h = FIELD_H;
 }
 
@@ -99,7 +111,7 @@ int get_buttons(button *b){
     b[count].action = layouts[app.screen][i].action;
     b[count].color = layouts[app.screen][i].color;
     b[count].x = x;
-    b[count].y = BUTTONS_Y;
+    b[count].y = buttons_y();
     b[count].w = platform_text_width(FONT_BOLD, label, (int) strlen(label)) + 36;
     b[count].h = BUTTON_H;
     x += b[count].w + 10;

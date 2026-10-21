@@ -16,8 +16,9 @@
  * | platform_x11.c     | Xlib (Linux)            |
  * | platform_win32.c   | Win32 and GDI (Windows) |
  *
- * All drawing goes to an off-screen buffer of WIDTH x HEIGHT pixels, which
- * platform_present() copies to the window. Colors are 0xRRGGBB values.
+ * All drawing goes to an off-screen buffer as large as the client area of the
+ * window, which platform_present() copies to the window. The buffer follows
+ * the window when it is resized (EVENT_RESIZE). Colors are 0xRRGGBB values.
  */
 
 #ifndef UI_PLATFORM_H
@@ -35,6 +36,7 @@ enum{
   EVENT_CLICK,               /**< Left mouse button pressed. */
   EVENT_WHEEL,               /**< Mouse wheel turned. */
   EVENT_KEY,                 /**< Key pressed. */
+  EVENT_RESIZE,              /**< The client area changed size; see platform_width(). */
   EVENT_QUIT                 /**< The user asked to close the window. */
 };
 
@@ -57,15 +59,39 @@ typedef struct{
 }ui_event;
 
 /**
- * @brief  Creates and shows the window with a client area of width x height
- *         pixels and loads the fonts.
- * @param  width      Client area width.
- * @param  height     Client area height.
+ * @brief  Creates and shows a resizable window with a client area of
+ *         width x height pixels, which is also its minimum size, and loads the
+ *         fonts.
+ * @param  width      Initial and minimum client area width.
+ * @param  height     Initial and minimum client area height.
  * @param  title      Window title.
  * @param  background Color shown before the first repaint.
  * @return True on success, false otherwise (an error has been reported).
  */
 bool platform_open(int width, int height, const char *title, unsigned long background);
+
+/**
+ * @brief Registers the function that repaints the window.
+ *
+ * Some backends cannot return events while the user is resizing the window
+ * (Win32 runs its own message loop then); they call redraw directly so that
+ * the contents follow the new size.
+ *
+ * @param redraw Function that repaints the whole window.
+ */
+void platform_set_redraw(void (*redraw)(void));
+
+/**
+ * @brief  Returns the current width of the client area and the buffer.
+ * @return Width in pixels.
+ */
+int  platform_width(void);
+
+/**
+ * @brief  Returns the current height of the client area and the buffer.
+ * @return Height in pixels.
+ */
+int  platform_height(void);
 
 /**
  * @brief Releases every windowing system resource.

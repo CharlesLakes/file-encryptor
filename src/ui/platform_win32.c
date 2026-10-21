@@ -14,6 +14,10 @@
  *
  * Navigation keys are read from WM_KEYDOWN and printable characters from
  * WM_CHAR, so each key press produces exactly one event.
+ *
+ * While the user drags a border, Win32 runs its own message loop and
+ * platform_next_event() does not return, so WM_SIZE repaints through the
+ * function registered with platform_set_redraw().
  */
 
 #include "ui/platform.h"
@@ -28,6 +32,8 @@ static struct{
   HBITMAP bitmap;                /**< Bitmap selected into buffer. */
   HGDIOBJ old_bitmap;            /**< Bitmap originally selected into buffer. */
   int width, height;             /**< Size of the client area and the buffer. */
+  int min_width, min_height;     /**< Minimum size of the client area. */
+  void (*redraw)(void);          /**< Repaints the window during a resize. */
   HFONT fonts[FONT_COUNT];       /**< Loaded fonts, indexed by FONT_*. */
   TEXTMETRICA metrics[FONT_COUNT]; /**< Metrics of each font. */
   ui_event pending;              /**< Event waiting to be returned. */
@@ -53,6 +59,42 @@ static COLORREF to_colorref(unsigned long color){
 static void post_event(const ui_event *event){
   w32.pending = *event;
   w32.has_pending = true;
+}
+
+/**
+ * @brief  Replaces the off-screen buffer with one of the given size, keeping
+ *         the fonts and drawing modes of the device context.
+ * @param  width  New width.
+ * @param  height New height.
+ * @return True on success, false otherwise (the old buffer is kept).
+ */
+static bool resize_buffer(int width, int height){
+  HDC dc = GetDC(w32.win);
+  HBITMAP bitmap = CreateCompatibleBitmap(dc, width, height);
+  ReleaseDC(w32.win, dc);
+  if(!bitmap) return false;
+  SelectObject(w32.buffer, bitmap);
+  DeleteObject(w32.bitmap);
+  w32.bitmap = bitmap;
+  w32.width = width;
+  w32.height = height;
+  return true;
+}
+
+/**
+ * @brief Grows the outer size of the window so that its client area is
+ *        width x height pixels.
+ * @param style  Window style.
+ * @param width  Client area width.
+ * @param height Client area height.
+ * @param out_w  Output: outer width.
+ * @param out_h  Output: outer height.
+ */
+static void outer_size(DWORD style, int width, int height, int *out_w, int *out_h){
+  RECT r = {0, 0, width, height};
+  AdjustWindowRect(&r, style, FALSE);
+  *out_w = r.right - r.left;
+  *out_h = r.bottom - r.top;
 }
 
 /**
@@ -102,6 +144,25 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
     case WM_ERASEBKGND:
       /* The whole client area is covered by the buffer. */
       return 1;
+    case WM_GETMINMAXINFO:{
+      MINMAXINFO *info = (MINMAXINFO *) lparam;
+      int w, h;
+      outer_size((DWORD) GetWindowLongA(hwnd, GWL_STYLE), w32.min_width, w32.min_height, &w, &h);
+      info->ptMinTrackSize.x = w;
+      info->ptMinTrackSize.y = h;
+      return 0;
+    }
+    case WM_SIZE:{
+      int w = LOWORD(lparam), h = HIWORD(lparam);
+      /* A minimized window reports 0 x 0: keep the current buffer. */
+      if(!w32.buffer || w == 0 || h == 0 || (w == w32.width && h == w32.height)) return 0;
+      if(resize_buffer(w, h)){
+        if(w32.redraw) w32.redraw();
+        event.type = EVENT_RESIZE;
+        post_event(&event);
+      }
+      return 0;
+    }
     case WM_LBUTTONDOWN:
       event.type = EVENT_CLICK;
       event.x = (short) LOWORD(lparam);
@@ -175,12 +236,13 @@ bool platform_open(int width, int height, const char *title, unsigned long backg
     return false;
   }
 
-  /* Grow the outer window so that the client area is exactly width x height. */
-  DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-  RECT r = {0, 0, width, height};
-  AdjustWindowRect(&r, style, FALSE);
+  DWORD style = WS_OVERLAPPEDWINDOW;
+  int outer_w, outer_h;
+  outer_size(style, width, height, &outer_w, &outer_h);
+  w32.min_width = width;
+  w32.min_height = height;
   w32.win = CreateWindowExA(0, CLASS_NAME, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
-                            r.right - r.left, r.bottom - r.top, NULL, NULL, instance, NULL);
+                            outer_w, outer_h, NULL, NULL, instance, NULL);
   if(!w32.win){
     platform_error("Could not create the window.");
     return false;
@@ -209,6 +271,18 @@ bool platform_open(int width, int height, const char *title, unsigned long backg
   ShowWindow(w32.win, SW_SHOWNORMAL);
   UpdateWindow(w32.win);
   return true;
+}
+
+void platform_set_redraw(void (*redraw)(void)){
+  w32.redraw = redraw;
+}
+
+int platform_width(void){
+  return w32.width;
+}
+
+int platform_height(void){
+  return w32.height;
 }
 
 void platform_close(void){

@@ -44,16 +44,24 @@
 
 /* ---------------- Geometry (pixels) ---------------- */
 
-#define WIDTH       760
-#define HEIGHT      560
-#define MARGIN      16
-#define ROW_H       22
-#define BUTTONS_Y   470
-#define BUTTON_H    34
-#define STATUS_Y    536
-#define FIELD_X     190
-#define FIELD_H     28
-#define MAX_BUTTONS 6
+/*
+ * The window can be resized. Titles stay at the top, while the buttons, the
+ * status line and the text fields are anchored to the bottom edge; lists grow
+ * to fill the space in between.
+ */
+
+#define MIN_WIDTH      760   /**< Initial and minimum client width. */
+#define MIN_HEIGHT     560   /**< Initial and minimum client height. */
+#define MARGIN         16
+#define ROW_H          22
+#define BUTTONS_BOTTOM 90    /**< Distance from the button row to the bottom edge. */
+#define BUTTON_H       34
+#define STATUS_BOTTOM  24    /**< Distance from the status baseline to the bottom edge. */
+#define FIELDS_ABOVE   118   /**< Distance from the first field to the button row. */
+#define FIELD_STEP     36    /**< Vertical distance between fields. */
+#define FIELD_X        190
+#define FIELD_H        28
+#define MAX_BUTTONS    6
 
 /* ---------------- Colors (0xRRGGBB) ---------------- */
 
@@ -134,7 +142,20 @@ void app_init(void);
 void app_free(void);
 
 /**
- * @brief Computes the rectangle of the list on the current screen.
+ * @brief  Returns the top coordinate of the button row.
+ * @return Y coordinate in pixels.
+ */
+int  buttons_y(void);
+
+/**
+ * @brief  Returns the baseline of the status line.
+ * @return Y coordinate in pixels.
+ */
+int  status_y(void);
+
+/**
+ * @brief Computes the rectangle of the list on the current screen, which
+ *        fills the space between the header and the fields or buttons.
  * @param x Output: left coordinate.
  * @param y Output: top coordinate.
  * @param w Output: width.

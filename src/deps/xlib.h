@@ -85,22 +85,52 @@ typedef struct{
   union{ char b[20]; short s[10]; long l[5]; }data;
 }XClientMessageEvent;
 
+typedef struct{
+  int type;
+  unsigned long serial;
+  Bool send_event;
+  Display *display;
+  Window event, window;
+  int x, y;
+  int width, height;
+  int border_width;
+  Window above;
+  Bool override_redirect;
+}XConfigureEvent;
+
 typedef union{
   int type;
   XButtonEvent xbutton;
   XKeyEvent xkey;
+  XConfigureEvent xconfigure;
   XClientMessageEvent xclient;
   long pad[24];
 }XEvent;
 
+typedef struct{
+  long flags;
+  int x, y;
+  int width, height;
+  int min_width, min_height;
+  int max_width, max_height;
+  int width_inc, height_inc;
+  struct{ int x, y; }min_aspect, max_aspect;
+  int base_width, base_height;
+  int win_gravity;
+}XSizeHints;
+
 #define KeyPress          2
 #define ButtonPress       4
 #define Expose            12
+#define ConfigureNotify   22
 #define ClientMessage     33
 
 #define KeyPressMask      (1L << 0)
 #define ButtonPressMask   (1L << 2)
 #define ExposureMask      (1L << 15)
+#define StructureNotifyMask (1L << 17)
+
+#define PMinSize          (1L << 4)
 
 #define XK_BackSpace      0xff08
 #define XK_Tab            0xff09
@@ -127,6 +157,7 @@ int          XDestroyWindow(Display *dpy, Window w);
 int          XStoreName(Display *dpy, Window w, const char *name);
 int          XSelectInput(Display *dpy, Window w, long mask);
 int          XMapWindow(Display *dpy, Window w);
+void         XSetWMNormalHints(Display *dpy, Window w, XSizeHints *hints);
 Atom         XInternAtom(Display *dpy, const char *name, Bool only_if_exists);
 int          XSetWMProtocols(Display *dpy, Window w, Atom *protocols, int count);
 int          XNextEvent(Display *dpy, XEvent *event);

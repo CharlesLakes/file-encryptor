@@ -184,7 +184,7 @@ static void draw_buttons(void){
 static void draw_folder_line(void){
   char line[PATH_MAX + 16];
   snprintf(line, sizeof(line), "Folder: %s", app.browser.dir);
-  draw_text_fit(FONT_REGULAR, MARGIN, 60, WIDTH - 2*MARGIN, line, true, COLOR_MUTED);
+  draw_text_fit(FONT_REGULAR, MARGIN, 60, platform_width() - 2*MARGIN, line, true, COLOR_MUTED);
 }
 
 /**
@@ -204,8 +204,8 @@ static void draw_open_screen(void){
  */
 static void draw_archive_screen(void){
   archive *a = &app.archive;
-  draw_text_fit(FONT_TITLE, MARGIN, 34, WIDTH - 2*MARGIN, fs_basename(a->path), false, COLOR_TEXT);
-  draw_text_fit(FONT_REGULAR, MARGIN, 58, WIDTH - 2*MARGIN, a->path, true, COLOR_MUTED);
+  draw_text_fit(FONT_TITLE, MARGIN, 34, platform_width() - 2*MARGIN, fs_basename(a->path), false, COLOR_TEXT);
+  draw_text_fit(FONT_REGULAR, MARGIN, 58, platform_width() - 2*MARGIN, a->path, true, COLOR_MUTED);
 
   uint64_t wasted = archive_wasted_space(a);
   char size_text[32], wasted_text[32], line[160];
@@ -230,14 +230,14 @@ static void draw_pick_screen(void){
 }
 
 void draw(void){
-  fill(0, 0, WIDTH, HEIGHT, COLOR_BG);
+  fill(0, 0, platform_width(), platform_height(), COLOR_BG);
 
   if(app.screen == SCREEN_OPEN) draw_open_screen();
   else if(app.screen == SCREEN_ARCHIVE) draw_archive_screen();
   else draw_pick_screen();
 
   draw_buttons();
-  draw_text_fit(FONT_REGULAR, MARGIN, STATUS_Y, WIDTH - 2*MARGIN, status_text, false,
+  draw_text_fit(FONT_REGULAR, MARGIN, status_y(), platform_width() - 2*MARGIN, status_text, false,
                 status_error ? COLOR_ERROR : COLOR_OK);
 
   platform_present();

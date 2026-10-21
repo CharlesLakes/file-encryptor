@@ -12,6 +12,16 @@
 #include "core/archive.h"
 #include "ui/ui.h"
 
+/**
+ * @brief Adapts the scroll of the current list to the new number of visible
+ *        rows and repaints the window.
+ */
+static void redraw(void){
+  clamp_scroll();
+  ensure_visible();
+  draw();
+}
+
 int main(void){
   if(!archive_crypto_init()){
     platform_error("Could not initialize libsodium.");
@@ -19,10 +29,11 @@ int main(void){
   }
 
   app_init();
-  if(!platform_open(WIDTH, HEIGHT, ".crls manager", COLOR_BG)){
+  if(!platform_open(MIN_WIDTH, MIN_HEIGHT, ".crls manager", COLOR_BG)){
     app_free();
     return 1;
   }
+  platform_set_redraw(redraw);
 
   bool running = true;
   while(running){
@@ -33,7 +44,8 @@ int main(void){
     else if(event.type == EVENT_KEY) handle_key(&event);
     else if(event.type == EVENT_QUIT) running = false;
 
-    if(running && event.type != EVENT_NONE) draw();
+    if(event.type == EVENT_RESIZE) redraw();
+    else if(running && event.type != EVENT_NONE) draw();
   }
 
   app_free();

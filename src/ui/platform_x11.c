@@ -22,6 +22,7 @@ static struct{
   Pixmap buffer;                 /**< Off-screen buffer. */
   GC gc;                         /**< Graphics context. */
   int width, height;             /**< Size of the buffer. */
+  unsigned int depth;            /**< Color depth of the screen. */
   XFontStruct *fonts[FONT_COUNT];/**< Loaded fonts, indexed by FONT_*. */
 }x11;
 
@@ -62,17 +63,37 @@ bool platform_open(int width, int height, const char *title, unsigned long backg
   int scr = XDefaultScreen(x11.dpy);
   x11.width = width;
   x11.height = height;
+  x11.depth = (unsigned int) XDefaultDepth(x11.dpy, scr);
   x11.win = XCreateSimpleWindow(x11.dpy, XRootWindow(x11.dpy, scr), 0, 0, (unsigned int) width,
                                 (unsigned int) height, 0, 0, background);
   XStoreName(x11.dpy, x11.win, title);
-  XSelectInput(x11.dpy, x11.win, ExposureMask | KeyPressMask | ButtonPressMask);
+  XSelectInput(x11.dpy, x11.win, ExposureMask | KeyPressMask | ButtonPressMask | StructureNotifyMask);
+
+  XSizeHints hints = {0};
+  hints.flags = PMinSize;
+  hints.min_width = width;
+  hints.min_height = height;
+  XSetWMNormalHints(x11.dpy, x11.win, &hints);
+
   x11.wm_delete = XInternAtom(x11.dpy, "WM_DELETE_WINDOW", 0);
   XSetWMProtocols(x11.dpy, x11.win, &x11.wm_delete, 1);
-  x11.buffer = XCreatePixmap(x11.dpy, x11.win, (unsigned int) width, (unsigned int) height,
-                             (unsigned int) XDefaultDepth(x11.dpy, scr));
+  x11.buffer = XCreatePixmap(x11.dpy, x11.win, (unsigned int) width, (unsigned int) height, x11.depth);
   x11.gc = XCreateGC(x11.dpy, x11.win, 0, NULL);
   XMapWindow(x11.dpy, x11.win);
   return true;
+}
+
+void platform_set_redraw(void (*redraw)(void)){
+  /* X11 always returns events, so main() repaints after EVENT_RESIZE. */
+  (void) redraw;
+}
+
+int platform_width(void){
+  return x11.width;
+}
+
+int platform_height(void){
+  return x11.height;
 }
 
 void platform_close(void){
@@ -118,6 +139,16 @@ void platform_next_event(ui_event *event){
 
   if(xe.type == Expose){
     event->type = EVENT_EXPOSE;
+  }else if(xe.type == ConfigureNotify){
+    /* Also sent when the window only moves. */
+    int w = xe.xconfigure.width, h = xe.xconfigure.height;
+    if(w != x11.width || h != x11.height){
+      XFreePixmap(x11.dpy, x11.buffer);
+      x11.buffer = XCreatePixmap(x11.dpy, x11.win, (unsigned int) w, (unsigned int) h, x11.depth);
+      x11.width = w;
+      x11.height = h;
+      event->type = EVENT_RESIZE;
+    }
   }else if(xe.type == ButtonPress){
     event->x = xe.xbutton.x;
     event->y = xe.xbutton.y;
