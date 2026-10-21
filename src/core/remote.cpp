@@ -84,22 +84,6 @@ private:
   size_t block_len_ = 0;               /**< Number of cached bytes (0 = empty). */
 };
 
-/** @brief Destination of a ranged GET. */
-typedef struct{
-  unsigned char *buf;                  /**< Where the bytes go. */
-  size_t capacity;                     /**< Bytes expected. */
-  size_t received;                     /**< Bytes received so far. */
-}range_sink_ctx;
-
-/** @brief http_sink that copies into a fixed buffer and rejects any excess. */
-static bool range_sink(void *ctx, const void *data, size_t len){
-  range_sink_ctx *r = (range_sink_ctx *) ctx;
-  if(len > r->capacity - r->received) return false;
-  memcpy(r->buf + r->received, data, len);
-  r->received += len;
-  return true;
-}
-
 bool remote_is_url(const char *s){
   return strncasecmp(s, "http://", 7) == 0 || strncasecmp(s, "https://", 8) == 0;
 }
@@ -120,15 +104,22 @@ bool remote_is_url(const char *s){
  * @return True on success, false otherwise (the status explains why).
  */
 bool remote_source::fetch_range(unsigned char *buf, uint64_t first, size_t len, bool check_etag, size_t *got){
-  std::string range = "Range: bytes=" + std::to_string(first) + "-" + std::to_string(first + len - 1);
-  std::string if_match = "If-Match: " + etag_;
-  const char *headers[] = {range.c_str(), check_etag && !etag_.empty() ? if_match.c_str() : NULL, NULL};
-
-  range_sink_ctx sink = {buf, len, 0};
-  http_request_spec req = {"GET", url_.c_str(), headers, -1, 0, range_sink, &sink};
+  /* Copy the body into buf and reject anything beyond the requested length. */
+  size_t received = 0;
+  auto sink = [&](std::span<const unsigned char> data){
+    if(data.size() > len - received) return false;
+    memcpy(buf + received, data.data(), data.size());
+    received += data.size();
+    return true;
+  };
+  http_request_spec req;
+  req.url = url_;
+  req.headers.push_back("Range: bytes=" + std::to_string(first) + "-" + std::to_string(first + len - 1));
+  if(check_etag && !etag_.empty()) req.headers.push_back("If-Match: " + etag_);
+  req.sink = sink;
   http_response resp;
-  if(!http_perform(&req, &resp)){
-    set_status(true, "Could not download %s: %s", url_.c_str(), resp.error);
+  if(!http_perform(req, resp)){
+    set_status(true, "Could not download %s: %s", url_.c_str(), resp.error.c_str());
     return false;
   }
   if(resp.status == 412){
@@ -144,17 +135,17 @@ bool remote_source::fetch_range(unsigned char *buf, uint64_t first, size_t len, 
     return false;
   }
 
-  std::optional<http_content_range> received = http_parse_content_range(resp.content_range);
-  if(!received || received->first != first || received->last - received->first + 1 != sink.received ||
-     (check_etag && received->total != size_)){
+  std::optional<http_content_range> range = http_parse_content_range(resp.content_range);
+  if(!range || range->first != first || range->last - range->first + 1 != received ||
+     (check_etag && range->total != size_)){
     set_status(true, "The server sent an unexpected range for %s.", url_.c_str());
     return false;
   }
   if(!check_etag){
-    size_ = received->total;
+    size_ = range->total;
     etag_ = resp.etag;
   }
-  *got = sink.received;
+  *got = received;
   return true;
 }
 
@@ -201,18 +192,20 @@ bool remote_open(archive *a, const char *url, const char *password){
  * @return True if a response was received.
  */
 static bool send_upload(remote_source *c, const append_upload *up, http_response *resp){
-  std::string base = "X-Crls-Base: " + std::to_string(up->claim.base);
-  std::string index_length = "X-Crls-Index-Length: " + std::to_string(up->claim.index_length);
-  std::string nonce = "X-Crls-Index-Nonce: " + http_hex_encode(up->claim.index_nonce);
-  std::string hash = "X-Crls-Body-Hash: " + http_hex_encode(up->claim.body_hash);
-  std::string sig = "X-Crls-Sig: " + http_hex_encode(up->claim.signature);
-  std::string if_match = "If-Match: " + c->etag();
-  const char *headers[] = {"Content-Type: application/octet-stream", base.c_str(), index_length.c_str(),
-                           nonce.c_str(), hash.c_str(), sig.c_str(), c->etag().empty() ? NULL : if_match.c_str(), NULL};
-
-  http_request_spec req = {"POST", c->url().c_str(), headers, up->body_fd(), up->claim.content_length, NULL, NULL};
-  if(http_perform(&req, resp)) return true;
-  set_status(true, "Could not upload to %s: %s", c->url().c_str(), resp->error);
+  http_request_spec req;
+  req.method = "POST";
+  req.url = c->url();
+  req.headers = {"Content-Type: application/octet-stream",
+                 "X-Crls-Base: " + std::to_string(up->claim.base),
+                 "X-Crls-Index-Length: " + std::to_string(up->claim.index_length),
+                 "X-Crls-Index-Nonce: " + http_hex_encode(up->claim.index_nonce),
+                 "X-Crls-Body-Hash: " + http_hex_encode(up->claim.body_hash),
+                 "X-Crls-Sig: " + http_hex_encode(up->claim.signature)};
+  if(!c->etag().empty()) req.headers.push_back("If-Match: " + c->etag());
+  req.body_fd = up->body_fd();
+  req.body_len = up->claim.content_length;
+  if(http_perform(req, *resp)) return true;
+  set_status(true, "Could not upload to %s: %s", c->url().c_str(), resp->error.c_str());
   return false;
 }
 

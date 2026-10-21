@@ -11,185 +11,205 @@
 
 #include "core/http.h"
 
+#include <cstdio>
+#include <cstring>
+#include <memory>
 #include <dlfcn.h>
-#include <stdio.h>
-#include <string.h>
 #include <strings.h>
 #include "core/fs.h"
 #include "deps/curl.h"
 
 namespace crls{
 
-static curl_api api;
-static bool loaded = false, load_failed = false;
+namespace{
+
+curl_api api;
+bool loaded = false, load_failed = false;
+
+/**
+ * @brief  Looks up a symbol of libcurl and stores it as a function pointer.
+ * @param  lib  Handle from dlopen().
+ * @param  name Symbol name.
+ * @param  out  Output: the function pointer.
+ * @return True if the symbol exists.
+ */
+template<class F>
+bool resolve(void *lib, const char *name, F &out){
+  void *p = dlsym(lib, name);
+  /* POSIX guarantees that the void* of dlsym() converts to a function pointer. */
+  out = reinterpret_cast<F>(p);
+  return p != nullptr;
+}
 
 /**
  * @brief  Loads libcurl and initializes it, once.
  * @return True if libcurl is usable.
  */
-static bool load_curl(void){
+bool load_curl(){
   if(loaded || load_failed) return loaded;
   void *lib = dlopen("libcurl.so.4", RTLD_NOW);
   if(!lib) lib = dlopen("libcurl-gnutls.so.4", RTLD_NOW);
-  if(!lib){
-    load_failed = true;
-    return false;
-  }
-  /* POSIX allows converting the void* of dlsym() to a function pointer. */
-  *(void **) &api.global_init = dlsym(lib, "curl_global_init");
-  *(void **) &api.easy_init = dlsym(lib, "curl_easy_init");
-  *(void **) &api.easy_setopt = dlsym(lib, "curl_easy_setopt");
-  *(void **) &api.easy_perform = dlsym(lib, "curl_easy_perform");
-  *(void **) &api.easy_getinfo = dlsym(lib, "curl_easy_getinfo");
-  *(void **) &api.easy_cleanup = dlsym(lib, "curl_easy_cleanup");
-  *(void **) &api.easy_strerror = dlsym(lib, "curl_easy_strerror");
-  *(void **) &api.slist_append = dlsym(lib, "curl_slist_append");
-  *(void **) &api.slist_free_all = dlsym(lib, "curl_slist_free_all");
-  if(!api.global_init || !api.easy_init || !api.easy_setopt || !api.easy_perform || !api.easy_getinfo ||
-     !api.easy_cleanup || !api.easy_strerror || !api.slist_append || !api.slist_free_all ||
-     api.global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK){
-    load_failed = true;
-    return false;
-  }
-  loaded = true;
-  return true;
+  bool ok = lib && resolve(lib, "curl_global_init", api.global_init) && resolve(lib, "curl_easy_init", api.easy_init) &&
+            resolve(lib, "curl_easy_setopt", api.easy_setopt) && resolve(lib, "curl_easy_perform", api.easy_perform) &&
+            resolve(lib, "curl_easy_getinfo", api.easy_getinfo) && resolve(lib, "curl_easy_cleanup", api.easy_cleanup) &&
+            resolve(lib, "curl_easy_strerror", api.easy_strerror) && resolve(lib, "curl_slist_append", api.slist_append) &&
+            resolve(lib, "curl_slist_free_all", api.slist_free_all) && api.global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK;
+  loaded = ok;
+  load_failed = !ok;
+  return ok;
 }
+
+/** @brief Deleter of an easy handle. */
+struct easy_deleter{
+  void operator()(CURL *h) const noexcept{ api.easy_cleanup(h); }
+};
+
+/** @brief Deleter of a header list. */
+struct slist_deleter{
+  void operator()(curl_slist *list) const noexcept{ api.slist_free_all(list); }
+};
+
+using easy_handle = std::unique_ptr<CURL, easy_deleter>;
+using header_list = std::unique_ptr<curl_slist, slist_deleter>;
 
 /* ---------------- Typed option wrappers ---------------- */
 
 /** @brief Sets an option that takes a long. */
-static CURLcode opt_long(CURL *h, int option, long value){
+CURLcode opt_long(CURL *h, int option, long value){
   return api.easy_setopt(h, option, value);
 }
 
 /** @brief Sets an option that takes a data pointer or a string. */
-static CURLcode opt_ptr(CURL *h, int option, const void *value){
+CURLcode opt_ptr(CURL *h, int option, const void *value){
   return api.easy_setopt(h, option, value);
 }
 
 /** @brief Sets an option that takes a curl_off_t. */
-static CURLcode opt_off(CURL *h, int option, curl_off_t value){
+CURLcode opt_off(CURL *h, int option, curl_off_t value){
   return api.easy_setopt(h, option, value);
 }
 
 /** @brief Sets a write or header callback. */
-static CURLcode opt_write_fn(CURL *h, int option, curl_write_callback fn){
+CURLcode opt_write_fn(CURL *h, int option, curl_write_callback fn){
   return api.easy_setopt(h, option, fn);
 }
 
 /** @brief Sets a read callback. */
-static CURLcode opt_read_fn(CURL *h, int option, curl_read_callback fn){
+CURLcode opt_read_fn(CURL *h, int option, curl_read_callback fn){
   return api.easy_setopt(h, option, fn);
 }
 
 /* ---------------- Callbacks ---------------- */
 
 /** @brief State shared by the callbacks of one request. */
-typedef struct{
-  const http_request_spec *req;        /**< Request. */
-  http_response *resp;                 /**< Response being filled. */
-  uint64_t body_sent;                  /**< Bytes of the POST body already read. */
-}transfer;
+struct transfer{
+  const http_request_spec &req;        /**< Request. */
+  http_response &resp;                 /**< Response being filled. */
+  uint64_t body_sent = 0;              /**< Bytes of the POST body already read. */
+};
 
 /**
- * @brief  Copies the value of a header line if its name matches.
- * @param  line     Header line (not terminated, may end in CRLF).
- * @param  len      Length of line.
- * @param  name     Header name followed by ':', e.g. "ETag:".
- * @param  out      Destination buffer.
- * @param  out_size Capacity of out.
+ * @brief Copies the value of a header line if its name matches.
+ * @param line Header line (may end in CRLF).
+ * @param name Header name followed by ':', e.g. "ETag:".
+ * @param out  Output: the value.
  */
-static void capture_header(const char *line, size_t len, const char *name, char *out, size_t out_size){
-  size_t name_len = strlen(name);
-  if(len < name_len || strncasecmp(line, name, name_len) != 0) return;
-  const char *v = line + name_len, *end = line + len;
-  while(v < end && (*v == ' ' || *v == '\t')) v++;
-  while(end > v && (end[-1] == '\r' || end[-1] == '\n' || end[-1] == ' ')) end--;
-  size_t n = (size_t) (end - v) < out_size - 1 ? (size_t) (end - v) : out_size - 1;
-  memcpy(out, v, n);
-  out[n] = '\0';
+void capture_header(std::string_view line, std::string_view name, std::string &out){
+  if(line.size() < name.size() || strncasecmp(line.data(), name.data(), name.size()) != 0) return;
+  std::string_view v = line.substr(name.size());
+  while(!v.empty() && (v.front() == ' ' || v.front() == '\t')) v.remove_prefix(1);
+  while(!v.empty() && (v.back() == '\r' || v.back() == '\n' || v.back() == ' ')) v.remove_suffix(1);
+  out = v;
 }
 
 /** @brief CURLOPT_HEADERFUNCTION: keeps Content-Range and ETag of the final response. */
-static size_t on_header(char *line, size_t size, size_t nitems, void *userdata){
-  transfer *t = (transfer *) userdata;
-  size_t len = size * nitems;
+size_t on_header(char *line, size_t size, size_t nitems, void *userdata){
+  transfer *t = static_cast<transfer *>(userdata);
+  std::string_view text(line, size * nitems);
   /* A new status line (after "100 Continue") starts a new set of headers. */
-  if(len >= 5 && strncmp(line, "HTTP/", 5) == 0){
-    t->resp->content_range[0] = '\0';
-    t->resp->etag[0] = '\0';
+  if(text.starts_with("HTTP/")){
+    t->resp.content_range.clear();
+    t->resp.etag.clear();
   }
-  capture_header(line, len, "Content-Range:", t->resp->content_range, sizeof(t->resp->content_range));
-  capture_header(line, len, "ETag:", t->resp->etag, sizeof(t->resp->etag));
-  return len;
+  capture_header(text, "Content-Range:", t->resp.content_range);
+  capture_header(text, "ETag:", t->resp.etag);
+  return text.size();
 }
 
 /** @brief CURLOPT_WRITEFUNCTION: passes the body to the sink. */
-static size_t on_body(char *ptr, size_t size, size_t nmemb, void *userdata){
-  transfer *t = (transfer *) userdata;
+size_t on_body(char *ptr, size_t size, size_t nmemb, void *userdata){
+  transfer *t = static_cast<transfer *>(userdata);
   size_t len = size * nmemb;
-  if(t->req->sink && !t->req->sink(t->req->sink_ctx, ptr, len)) return 0;
+  if(t->req.sink && !t->req.sink({reinterpret_cast<const unsigned char *>(ptr), len})) return 0;
   return len;
 }
 
 /** @brief CURLOPT_READFUNCTION: reads the next part of the POST body. */
-static size_t on_read(char *buffer, size_t size, size_t nitems, void *userdata){
-  transfer *t = (transfer *) userdata;
-  uint64_t left = t->req->body_len - t->body_sent;
-  size_t n = size * nitems < left ? size * nitems : (size_t) left;
-  if(n > 0 && !read_at(t->req->body_fd, buffer, n, t->body_sent)) return 0;
+size_t on_read(char *buffer, size_t size, size_t nitems, void *userdata){
+  transfer *t = static_cast<transfer *>(userdata);
+  uint64_t left = t->req.body_len - t->body_sent;
+  size_t n = size * nitems < left ? size * nitems : static_cast<size_t>(left);
+  if(n > 0 && !read_at(t->req.body_fd, buffer, n, t->body_sent)) return 0;
   t->body_sent += n;
   return n;
 }
 
-bool http_perform(const http_request_spec *req, http_response *resp){
-  memset(resp, 0, sizeof(*resp));
+}
+
+bool http_perform(const http_request_spec &req, http_response &resp){
+  resp = http_response();
   if(!load_curl()){
-    snprintf(resp->error, sizeof(resp->error), "libcurl (libcurl.so.4) is not installed.");
+    resp.error = "libcurl (libcurl.so.4) is not installed.";
     return false;
   }
-  CURL *h = api.easy_init();
+  easy_handle h(api.easy_init());
   if(!h){
-    snprintf(resp->error, sizeof(resp->error), "Could not start libcurl.");
+    resp.error = "Could not start libcurl.";
     return false;
   }
 
-  transfer t = {req, resp, 0};
-  struct curl_slist *headers = NULL;
-  for(int i = 0; req->headers && req->headers[i]; i++) headers = api.slist_append(headers, req->headers[i]);
+  transfer t{req, resp};
+  header_list headers;
+  for(const std::string &line : req.headers){
+    curl_slist *grown = api.slist_append(headers.get(), line.c_str());
+    if(!grown){
+      resp.error = "Not enough memory.";
+      return false;
+    }
+    headers.release();
+    headers.reset(grown);
+  }
   char error[CURL_ERROR_SIZE] = "";
+  std::string method(req.method);
 
-  opt_ptr(h, CURLOPT_URL, req->url);
-  opt_ptr(h, CURLOPT_ERRORBUFFER, error);
-  if(opt_ptr(h, CURLOPT_PROTOCOLS_STR, "http,https") == CURLE_UNKNOWN_OPTION)
-    opt_long(h, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
-  opt_long(h, CURLOPT_FOLLOWLOCATION, 0L);
-  opt_long(h, CURLOPT_NOSIGNAL, 1L);
-  opt_long(h, CURLOPT_CONNECTTIMEOUT, 15L);
+  opt_ptr(h.get(), CURLOPT_URL, req.url.c_str());
+  opt_ptr(h.get(), CURLOPT_ERRORBUFFER, error);
+  if(opt_ptr(h.get(), CURLOPT_PROTOCOLS_STR, "http,https") == CURLE_UNKNOWN_OPTION)
+    opt_long(h.get(), CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+  opt_long(h.get(), CURLOPT_FOLLOWLOCATION, 0L);
+  opt_long(h.get(), CURLOPT_NOSIGNAL, 1L);
+  opt_long(h.get(), CURLOPT_CONNECTTIMEOUT, 15L);
   /* Abort transfers slower than 1 KB/s for 30 seconds. */
-  opt_long(h, CURLOPT_LOW_SPEED_LIMIT, 1024L);
-  opt_long(h, CURLOPT_LOW_SPEED_TIME, 30L);
-  opt_write_fn(h, CURLOPT_HEADERFUNCTION, on_header);
-  opt_ptr(h, CURLOPT_HEADERDATA, &t);
-  opt_write_fn(h, CURLOPT_WRITEFUNCTION, on_body);
-  opt_ptr(h, CURLOPT_WRITEDATA, &t);
-  if(headers) opt_ptr(h, CURLOPT_HTTPHEADER, headers);
-  if(strcmp(req->method, "HEAD") == 0) opt_long(h, CURLOPT_NOBODY, 1L);
-  if(strcmp(req->method, "POST") == 0){
-    opt_long(h, CURLOPT_POST, 1L);
-    opt_off(h, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t) req->body_len);
-    opt_read_fn(h, CURLOPT_READFUNCTION, on_read);
-    opt_ptr(h, CURLOPT_READDATA, &t);
+  opt_long(h.get(), CURLOPT_LOW_SPEED_LIMIT, 1024L);
+  opt_long(h.get(), CURLOPT_LOW_SPEED_TIME, 30L);
+  opt_write_fn(h.get(), CURLOPT_HEADERFUNCTION, on_header);
+  opt_ptr(h.get(), CURLOPT_HEADERDATA, &t);
+  opt_write_fn(h.get(), CURLOPT_WRITEFUNCTION, on_body);
+  opt_ptr(h.get(), CURLOPT_WRITEDATA, &t);
+  if(headers) opt_ptr(h.get(), CURLOPT_HTTPHEADER, headers.get());
+  if(method == "HEAD") opt_long(h.get(), CURLOPT_NOBODY, 1L);
+  if(method == "POST"){
+    opt_long(h.get(), CURLOPT_POST, 1L);
+    opt_off(h.get(), CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(req.body_len));
+    opt_read_fn(h.get(), CURLOPT_READFUNCTION, on_read);
+    opt_ptr(h.get(), CURLOPT_READDATA, &t);
   }
 
-  CURLcode code = api.easy_perform(h);
+  CURLcode code = api.easy_perform(h.get());
   long status = 0;
-  api.easy_getinfo(h, CURLINFO_RESPONSE_CODE, &status);
-  resp->status = (int) status;
-  if(code != CURLE_OK)
-    snprintf(resp->error, sizeof(resp->error), "%s", error[0] ? error : api.easy_strerror(code));
-  api.easy_cleanup(h);
-  api.slist_free_all(headers);
+  api.easy_getinfo(h.get(), CURLINFO_RESPONSE_CODE, &status);
+  resp.status = static_cast<int>(status);
+  if(code != CURLE_OK) resp.error = error[0] ? error : api.easy_strerror(code);
   return code == CURLE_OK;
 }
 

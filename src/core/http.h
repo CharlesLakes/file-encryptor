@@ -23,52 +23,50 @@
 #ifndef CORE_HTTP_H
 #define CORE_HTTP_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include <cstdint>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+#include "lib/function_ref.h"
 
 namespace crls{
 
 /**
- * @brief Receives response body bytes.
- * @param ctx  State of the receiver.
- * @param data Bytes.
- * @param len  Number of bytes.
- * @return True to continue, false to abort the request.
+ * @brief Receives response body bytes; returns false to abort the request.
  */
-typedef bool (*http_sink)(void *ctx, const void *data, size_t len);
+using http_sink = function_ref<bool(std::span<const unsigned char> data)>;
 
 /**
- * @brief A request. Unused fields are zero.
+ * @brief A request.
  */
-typedef struct{
-  const char *method;                  /**< "GET", "HEAD" or "POST". */
-  const char *url;                     /**< Absolute http or https URL. */
-  const char *const *headers;          /**< Extra "Name: value" lines, NULL-terminated, or NULL. */
-  int body_fd;                         /**< File with the POST body, read from offset 0, or -1. */
-  uint64_t body_len;                   /**< Length of the POST body. */
-  http_sink sink;                      /**< Receiver of the response body, or NULL to discard it. */
-  void *sink_ctx;                      /**< State of sink. */
-}http_request_spec;
+struct http_request_spec{
+  std::string_view method = "GET";     /**< "GET", "HEAD" or "POST". */
+  std::string url;                     /**< Absolute http or https URL. */
+  std::vector<std::string> headers;    /**< Extra "Name: value" lines. */
+  int body_fd = -1;                    /**< File with the POST body, read from offset 0, or -1. */
+  uint64_t body_len = 0;               /**< Length of the POST body. */
+  http_sink sink;                      /**< Receiver of the response body; empty to discard it. */
+};
 
 /**
  * @brief What is kept of a response.
  */
-typedef struct{
-  int status;                          /**< Status code of the final response. */
-  char content_range[128];             /**< Content-Range header, or "". */
-  char etag[128];                      /**< ETag header, or "". */
-  char error[256];                     /**< Transport error when the request failed, or "". */
-}http_response;
+struct http_response{
+  int status = 0;                      /**< Status code of the final response. */
+  std::string content_range;           /**< Content-Range header, or empty. */
+  std::string etag;                    /**< ETag header, or empty. */
+  std::string error;                   /**< Transport error when the request failed, or empty. */
+};
 
 /**
  * @brief  Performs a request.
  * @param  req  Request.
  * @param  resp Output: response.
  * @return True if a response was received (whatever its status), false on a
- *         transport error (resp->error explains it).
+ *         transport error (resp.error explains it).
  */
-bool http_perform(const http_request_spec *req, http_response *resp);
+[[nodiscard]] bool http_perform(const http_request_spec &req, http_response &resp);
 
 }
 
