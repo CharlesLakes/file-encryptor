@@ -8,7 +8,7 @@
 
 #include "cli/cli.h"
 
-#include <stdio.h>
+#include <cstdio>
 #include "cli/tty.h"
 #include "core/archive.h"
 #include "core/remote.h"

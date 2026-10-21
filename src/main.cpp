@@ -19,8 +19,9 @@
  * Refer to README.md for the module overview and to ui/ui.h for the event flow.
  */
 
-#include <stdio.h>
-#include <string.h>
+#include <cstdio>
+#include <span>
+#include <string_view>
 #include "cli/cli.h"
 #include "core/archive.h"
 #include "server/server.h"
@@ -42,7 +43,7 @@ static void redraw(app_state &app){
 /**
  * @brief Prints the command-line usage.
  */
-static void usage(void){
+static void usage(){
   fprintf(stderr, "usage: file-encryptor                          start the GUI\n"
                   "       file-encryptor --server <folder>        serve the .crls files of a folder\n"
                   "       file-encryptor --upload <url> <file>... add files to an archive at a URL\n"
@@ -51,22 +52,20 @@ static void usage(void){
 
 /**
  * @brief  Runs a command-line mode.
- * @param  argc Number of arguments.
- * @param  argv Arguments.
+ * @param  args Arguments, including the program name (at least two).
  * @return Process exit code.
  */
-static int run_command(int argc, char **argv){
+static int run_command([[maybe_unused]] std::span<char *const> args){
 #if defined(_WIN32) && !defined(CRLS_CONSOLE)
   /* The GUI executable has no console to print to or read a password from. */
-  (void) argc;
-  (void) argv;
   platform_error("Run the command-line modes with file-encryptor-cli.exe.");
   return 2;
 #endif
-  if(strcmp(argv[1], "--server") == 0) return server_main(std::span<char *const>(argv + 1, static_cast<size_t>(argc - 1)));
-  if(strcmp(argv[1], "--upload") == 0) return cli_upload(std::span<char *const>(argv + 1, static_cast<size_t>(argc - 1)));
+  std::string_view mode = args[1];
+  if(mode == "--server") return server_main(args.subspan(1));
+  if(mode == "--upload") return cli_upload(args.subspan(1));
   usage();
-  return strcmp(argv[1], "--help") == 0 ? 0 : 2;
+  return mode == "--help" ? 0 : 2;
 }
 
 int main(int argc, char **argv){
@@ -75,7 +74,7 @@ int main(int argc, char **argv){
     else platform_error("Could not initialize libsodium.");
     return 1;
   }
-  if(argc > 1) return run_command(argc, argv);
+  if(argc > 1) return run_command(std::span<char *const>(argv, static_cast<std::size_t>(argc)));
 #ifdef CRLS_CONSOLE
   usage();
   return 2;
