@@ -14,7 +14,7 @@
 
 namespace crls{
 
-bool tty_read_password(const char *prompt, char *out, size_t out_size){
+bool tty_read_password(const char *prompt, std::span<char> out){
   HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
   DWORD mode;
   /* Not a console (a pipe or a file): read one line as it is. */
@@ -24,12 +24,12 @@ bool tty_read_password(const char *prompt, char *out, size_t out_size){
     fputs(prompt, stderr);
     fflush(stderr);
   }
-  bool ok = fgets(out, (int) out_size, stdin) != NULL;
+  bool ok = fgets(out.data(), static_cast<int>(out.size()), stdin) != NULL;
   if(console){
     SetConsoleMode(in, mode);
     fputc('\n', stderr);
   }
-  if(ok) out[strcspn(out, "\r\n")] = '\0';
+  if(ok) out[strcspn(out.data(), "\r\n")] = '\0';
   return ok;
 }
 

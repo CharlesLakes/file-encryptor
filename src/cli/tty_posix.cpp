@@ -17,19 +17,18 @@ namespace crls{
 
 /**
  * @brief  Reads one line from f and removes its line ending.
- * @param  f        Stream.
- * @param  out      Destination buffer.
- * @param  out_size Capacity of out.
+ * @param  f   Stream.
+ * @param  out Destination.
  * @return True if a line was read.
  */
-static bool read_line(FILE *f, char *out, size_t out_size){
-  if(!fgets(out, (int) out_size, f)) return false;
-  out[strcspn(out, "\r\n")] = '\0';
+static bool read_line(FILE *f, std::span<char> out){
+  if(!fgets(out.data(), static_cast<int>(out.size()), f)) return false;
+  out[strcspn(out.data(), "\r\n")] = '\0';
   return true;
 }
 
-bool tty_read_password(const char *prompt, char *out, size_t out_size){
-  if(!isatty(STDIN_FILENO)) return read_line(stdin, out, out_size);
+bool tty_read_password(const char *prompt, std::span<char> out){
+  if(!isatty(STDIN_FILENO)) return read_line(stdin, out);
 
   FILE *tty = fopen("/dev/tty", "r+");
   if(!tty) return false;
@@ -42,7 +41,7 @@ bool tty_read_password(const char *prompt, char *out, size_t out_size){
   }
   fputs(prompt, stderr);
   fflush(stderr);
-  bool ok = read_line(tty, out, out_size);
+  bool ok = read_line(tty, out);
   if(restore) tcsetattr(fileno(tty), TCSAFLUSH, &saved);
   fputc('\n', stderr);
   fclose(tty);

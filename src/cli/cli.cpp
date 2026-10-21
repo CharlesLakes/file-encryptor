@@ -13,34 +13,34 @@
 #include "core/archive.h"
 #include "core/remote.h"
 #include "core/status.h"
-#include "deps/sodium.h"
+#include "lib/secret.h"
 
 namespace crls{
 
-int cli_upload(int argc, char **argv){
-  if(argc < 3 || !remote_is_url(argv[1])){
+int cli_upload(std::span<char *const> args){
+  if(args.size() < 3 || !remote_is_url(args[1])){
     fprintf(stderr, "usage: file-encryptor --upload <http(s) URL of a .crls> <file> [file ...]\n");
     return 2;
   }
 
-  char password[MAX_PASSWORD + 2];
-  if(!tty_read_password("Password: ", password, sizeof(password))){
-    fprintf(stderr, "Could not read the password.\n");
-    return 2;
-  }
-
   archive a;
-  bool opened = remote_open(a, argv[1], password);
-  sodium_memzero(password, sizeof(password));
-  if(!opened){
-    fprintf(stderr, "%s\n", status_text);
-    return 1;
+  {
+    /* The password only lives in this wiped buffer, and only until the key is derived. */
+    secret_text<MAX_PASSWORD + 2> password;
+    if(!tty_read_password("Password: ", password.span())){
+      fprintf(stderr, "Could not read the password.\n");
+      return 2;
+    }
+    if(!remote_open(a, args[1], password.data())){
+      fprintf(stderr, "%s\n", status_text);
+      return 1;
+    }
   }
 
   int failed = 0;
-  for(int i = 2; i < argc; i++){
-    bool ok = remote_add_file(a, argv[i]);
-    fprintf(stderr, "%s: %s\n", argv[i], status_text);
+  for(char *path : args.subspan(2)){
+    bool ok = remote_add_file(a, path);
+    fprintf(stderr, "%s: %s\n", path, status_text);
     if(!ok) failed++;
   }
   return failed ? 1 : 0;

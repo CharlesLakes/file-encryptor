@@ -27,18 +27,17 @@ using namespace crls;
 /**
  * @brief  Runs cli_upload() with the given password on standard input.
  * @param  password Line given on standard input.
- * @param  argc     Number of arguments, starting at "--upload".
- * @param  argv     Arguments, starting at "--upload".
+ * @param  args     Arguments, starting at "--upload".
  * @return Exit code of cli_upload().
  */
-static int run_upload(const char *password, int argc, char **argv){
+static int run_upload(const char *password, std::span<char *const> args){
   char input[PATH_MAX];
   path_in(input, "stdin.txt");
   FILE *f = fopen(input, "w");
   fprintf(f, "%s\n", password);
   fclose(f);
   if(!freopen(input, "r", stdin)) return -1;
-  return cli_upload(argc, argv);
+  return cli_upload(args);
 }
 
 int main(void){
@@ -65,11 +64,11 @@ int main(void){
   /* argv is writable in C and C++, string literals are not. */
   char upload[] = "--upload";
   char *usage[] = {upload, url};
-  CHECK(cli_upload(2, usage) == 2);
+  CHECK(cli_upload(usage) == 2);
 
   /* The wrong password opens nothing and uploads nothing. */
   char *args[] = {upload, url, one, two};
-  int code = run_upload("not-the-password", 4, args);
+  int code = run_upload("not-the-password", args);
   if(strstr(status_text, "libcurl") != NULL){
     printf("SKIP: %s\n", status_text);
     stop_test_server();
@@ -78,9 +77,9 @@ int main(void){
   }
   CHECK(code == 1);
 
-  CHECK(run_upload(PASSWORD, 4, args) == 0);
+  CHECK(run_upload(PASSWORD, args) == 0);
   /* Uploading the same names again fails for each file. */
-  CHECK(run_upload(PASSWORD, 4, args) == 1);
+  CHECK(run_upload(PASSWORD, args) == 1);
   stop_test_server();
 
   CHECK(a.open(crls, PASSWORD));

@@ -18,16 +18,17 @@
 #ifndef CLI_CLI_H
 #define CLI_CLI_H
 
+#include <span>
+
 namespace crls{
 
 /**
  * @brief  Runs `--upload <url> <file>...`.
- * @param  argc Number of arguments, starting at "--upload".
- * @param  argv Arguments, starting at "--upload".
+ * @param  args Arguments, starting at "--upload".
  * @return Process exit code: 0 if every file was uploaded, 1 if any failed,
  *         2 on a usage error.
  */
-int cli_upload(int argc, char **argv);
+int cli_upload(std::span<char *const> args);
 
 }
 
