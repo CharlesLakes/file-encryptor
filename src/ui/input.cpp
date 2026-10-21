@@ -50,12 +50,13 @@ void handle_click(const ui_event *event){
       return;
     }
 
-  if(app.screen == SCREEN_OPEN)
-    for(int i = 0; i < FIELD_COUNT; i++){
+  if(app.screen == ui_screen::open)
+    for(int i = 0; i < UI_FIELD_COUNT; i++){
+      ui_field field = static_cast<ui_field>(i);
       int fx, fy, fw, fh;
-      field_rect(i, &fx, &fy, &fw, &fh);
+      field_rect(field, &fx, &fy, &fw, &fh);
       if(inside(px, py, fx, fy, fw, fh)){
-        app.focus = i;
+        app.focus = field;
         return;
       }
     }
@@ -82,9 +83,9 @@ void handle_click(const ui_event *event){
  * @param erase True to delete the last character instead.
  */
 static void edit_field(char c, bool erase){
-  char *field = app.focus == FIELD_PATH ? app.path_field
-              : app.focus == FIELD_PASSWORD ? app.password_field : app.confirm_field;
-  size_t max = app.focus == FIELD_PATH ? sizeof(app.path_field) - 1 : MAX_PASSWORD;
+  char *field = app.focus == ui_field::path ? app.path_field
+              : app.focus == ui_field::password ? app.password_field : app.confirm_field;
+  size_t max = app.focus == ui_field::path ? sizeof(app.path_field) - 1 : MAX_PASSWORD;
   size_t len = strlen(field);
   if(erase){
     if(len) field[len-1] = '\0';
@@ -106,11 +107,12 @@ void handle_key(const ui_event *event){
     case KEY_END:       move_selection(list_count()); return;
   }
 
-  if(app.screen == SCREEN_OPEN){
-    if(key == KEY_TAB){ app.focus = (app.focus + 1) % FIELD_COUNT; return; }
-    if(key == KEY_BACK_TAB){ app.focus = (app.focus + FIELD_COUNT - 1) % FIELD_COUNT; return; }
+  if(app.screen == ui_screen::open){
+    int focus = static_cast<int>(app.focus);
+    if(key == KEY_TAB){ app.focus = static_cast<ui_field>((focus + 1) % UI_FIELD_COUNT); return; }
+    if(key == KEY_BACK_TAB){ app.focus = static_cast<ui_field>((focus + UI_FIELD_COUNT - 1) % UI_FIELD_COUNT); return; }
     if(key == KEY_ENTER){
-      handle_action(app.focus == FIELD_CONFIRM ? ACT_CREATE : ACT_OPEN);
+      handle_action(app.focus == ui_field::confirm ? ui_action::create : ui_action::open);
       return;
     }
     if(key == KEY_BACKSPACE){ edit_field(0, true); return; }
@@ -120,12 +122,12 @@ void handle_key(const ui_event *event){
 
   if(key == KEY_ENTER){
     activate_selection();
-  }else if(key == KEY_ESCAPE && app.screen != SCREEN_ARCHIVE){
-    handle_action(ACT_PICK_CANCEL);
-  }else if(key == KEY_BACKSPACE && app.screen != SCREEN_ARCHIVE && !fs_is_root(app.files.dir().c_str())){
+  }else if(key == KEY_ESCAPE && app.screen != ui_screen::archive){
+    handle_action(ui_action::pick_cancel);
+  }else if(key == KEY_BACKSPACE && app.screen != ui_screen::archive && !fs_is_root(app.files.dir().c_str())){
     app.files.enter("..");
-  }else if(key == KEY_DELETE && app.screen == SCREEN_ARCHIVE){
-    handle_action(ACT_DELETE);
+  }else if(key == KEY_DELETE && app.screen == ui_screen::archive){
+    handle_action(ui_action::remove);
   }
 }
 

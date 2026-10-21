@@ -95,7 +95,7 @@ static void draw_list(void){
   int text_y = (ROW_H + platform_font_ascent(FONT_REGULAR) - platform_font_descent(FONT_REGULAR)) / 2;
 
   if(count == 0){
-    const char *hint = app.screen == SCREEN_ARCHIVE ? "The .crls is empty. Use \"Add\"."
+    const char *hint = app.screen == ui_screen::archive ? "The .crls is empty. Use \"Add\"."
                                                     : "(empty folder)";
     draw_text(FONT_REGULAR, x + 12, y + text_y, hint, COLOR_MUTED);
   }
@@ -105,7 +105,7 @@ static void draw_list(void){
     if(i == sel) fill(x, row_y, w, ROW_H, COLOR_SELECTED);
     else if(r % 2) fill(x, row_y, w, ROW_H, COLOR_ROW_ALT);
 
-    if(app.screen == SCREEN_ARCHIVE){
+    if(app.screen == ui_screen::archive){
       const archive_entry &e = app.arc.entries()[i];
       char size_text[32];
       format_size(e.size, size_text, sizeof(size_text));
@@ -130,13 +130,13 @@ static void draw_list(void){
 }
 
 /**
- * @brief Draws a labeled text field of SCREEN_OPEN.
- * @param index  FIELD_* value.
+ * @brief Draws a labeled text field of ui_screen::open.
+ * @param index  Field.
  * @param label  Label displayed to the left.
  * @param value  Field content.
  * @param secret True to mask the content with asterisks.
  */
-static void draw_field(int index, const char *label, const char *value, bool secret){
+static void draw_field(ui_field index, const char *label, const char *value, bool secret){
   int x, y, w, h;
   field_rect(index, &x, &y, &w, &h);
   int text_y = y + (h + platform_font_ascent(FONT_REGULAR) - platform_font_descent(FONT_REGULAR)) / 2;
@@ -190,19 +190,19 @@ static void draw_folder_line(void){
 }
 
 /**
- * @brief Draws SCREEN_OPEN.
+ * @brief Draws ui_screen::open.
  */
 static void draw_open_screen(void){
   draw_text(FONT_TITLE, MARGIN, 34, ".crls archive manager", COLOR_TEXT);
   draw_folder_line();
   draw_list();
-  draw_field(FIELD_PATH, ".crls file or URL", app.path_field, false);
-  draw_field(FIELD_PASSWORD, "Password", app.password_field, true);
-  draw_field(FIELD_CONFIRM, "Confirm (create)", app.confirm_field, true);
+  draw_field(ui_field::path, ".crls file or URL", app.path_field, false);
+  draw_field(ui_field::password, "Password", app.password_field, true);
+  draw_field(ui_field::confirm, "Confirm (create)", app.confirm_field, true);
 }
 
 /**
- * @brief Draws SCREEN_ARCHIVE.
+ * @brief Draws ui_screen::archive.
  */
 static void draw_archive_screen(void){
   archive *a = &app.arc;
@@ -221,10 +221,10 @@ static void draw_archive_screen(void){
 }
 
 /**
- * @brief Draws SCREEN_PICK_ADD and SCREEN_PICK_EXTRACT.
+ * @brief Draws ui_screen::pick_add and ui_screen::pick_extract.
  */
 static void draw_pick_screen(void){
-  const char *title = app.screen == SCREEN_PICK_ADD ? "Choose the file to add"
+  const char *title = app.screen == ui_screen::pick_add ? "Choose the file to add"
                     : app.extract_all ? "Choose the folder to extract everything into"
                     : "Choose the folder to extract into";
   draw_text(FONT_TITLE, MARGIN, 34, title, COLOR_TEXT);
@@ -235,8 +235,8 @@ static void draw_pick_screen(void){
 void draw(void){
   fill(0, 0, platform_width(), platform_height(), COLOR_BG);
 
-  if(app.screen == SCREEN_OPEN) draw_open_screen();
-  else if(app.screen == SCREEN_ARCHIVE) draw_archive_screen();
+  if(app.screen == ui_screen::open) draw_open_screen();
+  else if(app.screen == ui_screen::archive) draw_archive_screen();
   else draw_pick_screen();
 
   draw_buttons();

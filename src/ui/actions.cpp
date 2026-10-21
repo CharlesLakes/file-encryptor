@@ -40,12 +40,12 @@ static void resolve_field_path(char *out, size_t out_size){
 /**
  * @brief Switches to another screen. Browsing screens reload the folder with
  *        the given filter.
- * @param new_screen SCREEN_* value.
+ * @param new_screen Screen to show.
  * @param filter     Filter used by browsing screens.
  */
-static void go_to(int new_screen, browser_filter filter){
+static void go_to(ui_screen new_screen, browser_filter filter){
   app.screen = new_screen;
-  if(new_screen != SCREEN_ARCHIVE){
+  if(new_screen != ui_screen::archive){
     app.files.filter = filter;
     app.files.load();
   }
@@ -53,10 +53,10 @@ static void go_to(int new_screen, browser_filter filter){
 }
 
 /**
- * @brief On SCREEN_OPEN, copies the path of the selected file to the path field.
+ * @brief On ui_screen::open, copies the path of the selected file to the path field.
  */
 static void on_browser_select(void){
-  if(app.screen != SCREEN_OPEN || app.files.sel < 0) return;
+  if(app.screen != ui_screen::open || app.files.sel < 0) return;
   const dir_item *item = &app.files.items()[app.files.sel];
   if(!item->is_dir) join_path(app.path_field, sizeof(app.path_field), app.files.dir().c_str(), item->name.c_str());
 }
@@ -73,7 +73,7 @@ static void open_archive(void){
   }
   if(app.password_field[0] == '\0'){
     set_status(true, "Type the password.");
-    app.focus = FIELD_PASSWORD;
+    app.focus = ui_field::password;
     return;
   }
 
@@ -89,7 +89,7 @@ static void open_archive(void){
   unsigned int n = app.arc.entries().size();
   app.entry_sel = n ? 0 : -1;
   app.entry_scroll = 0;
-  go_to(SCREEN_ARCHIVE, app.files.filter);
+  go_to(ui_screen::archive, app.files.filter);
   set_status(false, "Archive opened: %u file%s.", n, n == 1 ? "" : "s");
 }
 
@@ -99,7 +99,7 @@ static void open_archive(void){
 static void create_archive(void){
   if(app.path_field[0] == '\0'){
     set_status(true, "Type the name of the new .crls file.");
-    app.focus = FIELD_PATH;
+    app.focus = ui_field::path;
     return;
   }
 
@@ -114,12 +114,12 @@ static void create_archive(void){
 
   if(strlen(app.password_field) < MIN_PASSWORD){
     set_status(true, "The password must have at least %zu characters.", MIN_PASSWORD);
-    app.focus = FIELD_PASSWORD;
+    app.focus = ui_field::password;
     return;
   }
   if(strcmp(app.password_field, app.confirm_field) != 0){
     set_status(true, "The confirmation does not match the password.");
-    app.focus = FIELD_CONFIRM;
+    app.focus = ui_field::confirm;
     return;
   }
   if(access(path, F_OK) == 0){
@@ -134,7 +134,7 @@ static void create_archive(void){
   clear_secrets();
   app.entry_sel = -1;
   app.entry_scroll = 0;
-  go_to(SCREEN_ARCHIVE, app.files.filter);
+  go_to(ui_screen::archive, app.files.filter);
   set_status(false, "Created %s.", app.arc.path().c_str());
 }
 
@@ -197,19 +197,19 @@ static void compact(void){
   char wasted_text[32];
   format_size(wasted, wasted_text, sizeof(wasted_text));
   if(app.arc.compact()) set_status(false, "Compacted: reclaimed %s.", wasted_text);
-  else if(!app.arc.is_open()) app.screen = SCREEN_OPEN;
+  else if(!app.arc.is_open()) app.screen = ui_screen::open;
 }
 
 /**
- * @brief Confirms the browsing screen: "Add" on SCREEN_PICK_ADD or
- *        "Extract here" on SCREEN_PICK_EXTRACT.
+ * @brief Confirms the browsing screen: "Add" on ui_screen::pick_add or
+ *        "Extract here" on ui_screen::pick_extract.
  */
 static void pick_confirm(void){
-  if(app.screen == SCREEN_PICK_EXTRACT){
+  if(app.screen == ui_screen::pick_extract){
     set_status(false, "Extracting...");
     draw();
     extract_to_current_dir();
-    app.screen = SCREEN_ARCHIVE;
+    app.screen = ui_screen::archive;
     return;
   }
 
@@ -229,28 +229,28 @@ static void pick_confirm(void){
   draw();
   if(remote ? remote_add_file(app.arc, path) : app.arc.add_file(path)){
     app.entry_sel = (int) app.arc.entries().size() - 1;
-    app.screen = SCREEN_ARCHIVE;
+    app.screen = ui_screen::archive;
     ensure_visible();
   }
 }
 
-void handle_action(int action){
-  if(action != ACT_DELETE) app.confirm_delete = -1;
+void handle_action(ui_action action){
+  if(action != ui_action::remove) app.confirm_delete = -1;
 
   switch(action){
-    case ACT_OPEN:
+    case ui_action::open:
       open_archive();
       break;
-    case ACT_CREATE:
+    case ui_action::create:
       create_archive();
       break;
-    case ACT_ADD:
-      go_to(SCREEN_PICK_ADD, browser_filter::all);
+    case ui_action::add:
+      go_to(ui_screen::pick_add, browser_filter::all);
       clear_status();
       break;
-    case ACT_EXTRACT:
-    case ACT_EXTRACT_ALL:
-      if(action == ACT_EXTRACT && app.entry_sel < 0){
+    case ui_action::extract:
+    case ui_action::extract_all:
+      if(action == ui_action::extract && app.entry_sel < 0){
         set_status(true, "Select the file you want to extract.");
         break;
       }
@@ -258,26 +258,26 @@ void handle_action(int action){
         set_status(true, "There are no files to extract.");
         break;
       }
-      app.extract_all = action == ACT_EXTRACT_ALL;
-      go_to(SCREEN_PICK_EXTRACT, browser_filter::dirs);
+      app.extract_all = action == ui_action::extract_all;
+      go_to(ui_screen::pick_extract, browser_filter::dirs);
       clear_status();
       break;
-    case ACT_DELETE:
+    case ui_action::remove:
       delete_selected();
       break;
-    case ACT_COMPACT:
+    case ui_action::compact:
       compact();
       break;
-    case ACT_CLOSE:
+    case ui_action::close:
       app.arc.close();
-      go_to(SCREEN_OPEN, browser_filter::crls);
+      go_to(ui_screen::open, browser_filter::crls);
       set_status(false, "Archive closed.");
       break;
-    case ACT_PICK_CONFIRM:
+    case ui_action::pick_confirm:
       pick_confirm();
       break;
-    case ACT_PICK_CANCEL:
-      app.screen = SCREEN_ARCHIVE;
+    case ui_action::pick_cancel:
+      app.screen = ui_screen::archive;
       clear_status();
       break;
   }
@@ -289,19 +289,19 @@ void activate_selection(void){
   int sel = *list_sel();
   if(sel < 0) return;
 
-  if(app.screen == SCREEN_ARCHIVE){
-    handle_action(ACT_EXTRACT);
+  if(app.screen == ui_screen::archive){
+    handle_action(ui_action::extract);
     return;
   }
 
   const dir_item *item = &app.files.items()[sel];
   if(item->is_dir){
     app.files.enter(item->name);
-  }else if(app.screen == SCREEN_OPEN){
+  }else if(app.screen == ui_screen::open){
     on_browser_select();
-    app.focus = FIELD_PASSWORD;
-  }else if(app.screen == SCREEN_PICK_ADD){
-    handle_action(ACT_PICK_CONFIRM);
+    app.focus = ui_field::password;
+  }else if(app.screen == ui_screen::pick_add){
+    handle_action(ui_action::pick_confirm);
   }
 }
 

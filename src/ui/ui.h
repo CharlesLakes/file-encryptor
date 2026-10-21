@@ -11,10 +11,10 @@
  *
  * | Screen              | Purpose                                              |
  * |---------------------|------------------------------------------------------|
- * | SCREEN_OPEN         | Select a .crls file, enter the password, open/create |
- * | SCREEN_ARCHIVE      | Contents of the open archive and its actions         |
- * | SCREEN_PICK_ADD     | Folder browser to select the file to add             |
- * | SCREEN_PICK_EXTRACT | Folder browser to select the extraction destination  |
+ * | ui_screen::open         | Select a .crls file, enter the password, open/create |
+ * | ui_screen::archive      | Contents of the open archive and its actions         |
+ * | ui_screen::pick_add     | Folder browser to select the file to add             |
+ * | ui_screen::pick_extract | Folder browser to select the extraction destination  |
  *
  * @section ui_flow Event Flow
  *
@@ -86,17 +86,18 @@ namespace crls{
 
 /* ---------------- State ---------------- */
 
-/** @brief Screens of the application. */
-enum{ SCREEN_OPEN, SCREEN_ARCHIVE, SCREEN_PICK_ADD, SCREEN_PICK_EXTRACT };
+/** @brief Screens of the application (see the table above). */
+enum class ui_screen{ open, archive, pick_add, pick_extract };
 
 /** @brief Actions triggered by buttons and keys. */
-enum{
-  ACT_NONE, ACT_OPEN, ACT_CREATE, ACT_ADD, ACT_EXTRACT, ACT_EXTRACT_ALL,
-  ACT_DELETE, ACT_COMPACT, ACT_CLOSE, ACT_PICK_CONFIRM, ACT_PICK_CANCEL
+enum class ui_action{
+  none, open, create, add, extract, extract_all, remove, compact, close, pick_confirm, pick_cancel
 };
 
-/** @brief Text fields of SCREEN_OPEN, in focus order. */
-enum{ FIELD_PATH, FIELD_PASSWORD, FIELD_CONFIRM, FIELD_COUNT };
+/** @brief Text fields of ui_screen::open, in focus order. */
+enum class ui_field{ path, password, confirm };
+
+inline constexpr int UI_FIELD_COUNT = 3;   /**< Number of ui_field values. */
 
 /**
  * @brief Button drawn on the current screen.
@@ -104,7 +105,7 @@ enum{ FIELD_PATH, FIELD_PASSWORD, FIELD_CONFIRM, FIELD_COUNT };
 typedef struct{
   int x, y, w, h;                /**< Bounding rectangle. */
   const char *label;             /**< Displayed text. */
-  int action;                    /**< ACT_* value triggered on click. */
+  ui_action action;              /**< Action triggered on click. */
   unsigned long color;           /**< Background color. */
 }button;
 
@@ -112,18 +113,18 @@ typedef struct{
  * @brief Application state shared by all UI modules.
  */
 typedef struct{
-  int screen;                    /**< Current SCREEN_* value. */
+  ui_screen screen;              /**< Current screen. */
   archive arc;                   /**< Currently open archive, if any. */
   browser files;                 /**< Folder browser used by the browsing screens. */
 
-  bool extract_all;              /**< SCREEN_PICK_EXTRACT: all files or only the selected one. */
-  int entry_sel, entry_scroll;   /**< Selection and scroll in SCREEN_ARCHIVE (-1 = none). */
+  bool extract_all;              /**< ui_screen::pick_extract: all files or only the selected one. */
+  int entry_sel, entry_scroll;   /**< Selection and scroll in ui_screen::archive (-1 = none). */
   int confirm_delete;            /**< Entry awaiting a second Delete press, or -1. */
 
   char path_field[PATH_MAX];     /**< Content of the path field. */
   char password_field[MAX_PASSWORD + 1]; /**< Content of the password field. */
   char confirm_field[MAX_PASSWORD + 1];  /**< Content of the confirmation field. */
-  int focus;                     /**< FIELD_* value with keyboard focus. */
+  ui_field focus;                /**< Field with keyboard focus. */
 
   unsigned long last_click_time; /**< Time of the last click, for double-click detection. */
   int last_click_index;          /**< Row of the last click, for double-click detection. */
@@ -134,7 +135,7 @@ extern app_state app;            /**< Global application state (layout.c). */
 /* ---------------- layout.c ---------------- */
 
 /**
- * @brief Initializes the application state on SCREEN_OPEN.
+ * @brief Initializes the application state on ui_screen::open.
  */
 void app_init(void);
 
@@ -201,14 +202,14 @@ void clamp_scroll(void);
 void ensure_visible(void);
 
 /**
- * @brief Computes the rectangle of a text field on SCREEN_OPEN.
- * @param index FIELD_* value.
+ * @brief Computes the rectangle of a text field on ui_screen::open.
+ * @param field Field.
  * @param x     Output: left coordinate.
  * @param y     Output: top coordinate.
  * @param w     Output: width.
  * @param h     Output: height.
  */
-void field_rect(int index, int *x, int *y, int *w, int *h);
+void field_rect(ui_field field, int *x, int *y, int *w, int *h);
 
 /**
  * @brief  Fills b with the buttons of the current screen.
@@ -228,9 +229,9 @@ void draw(void);
 
 /**
  * @brief Executes an action.
- * @param action ACT_* value.
+ * @param action Action.
  */
-void handle_action(int action);
+void handle_action(ui_action action);
 
 /**
  * @brief Activates the selected row (Enter key or double click).
