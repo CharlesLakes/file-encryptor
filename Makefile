@@ -74,7 +74,7 @@ run: $(BIN)
 	./$(BIN)
 
 test: $(TEST)
-	./$(TEST)
+	./$(TEST) tests/fixtures
 
 clean:
 	rm -rf $(BUILD)

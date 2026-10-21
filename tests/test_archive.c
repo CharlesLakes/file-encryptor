@@ -6,6 +6,9 @@
  * Maintainer: @CharlesLakes
  *
  * No display is required. Runs on Linux and Windows. Run with `make test`.
+ *
+ * The only argument is the folder holding tests/fixtures/v2.crls, an archive
+ * written by the version 2 format code (see tests/fixtures/README.md).
  */
 
 #include <stdio.h>
@@ -59,6 +62,10 @@ static void path_in(char *out, const char *name){
 
 /**
  * @brief Writes size pseudo-random bytes to name inside the test folder.
+ *
+ * Uses its own xorshift generator instead of rand(), so the contents are the
+ * same on every platform; tests/fixtures/v2.crls relies on it.
+ *
  * @param name File name.
  * @param size Number of bytes.
  * @param seed Seed of the pseudo-random generator.
@@ -67,9 +74,30 @@ static void make_file(const char *name, size_t size, unsigned seed){
   char path[PATH_MAX];
   path_in(path, name);
   FILE *f = fopen(path, "wb");
-  srand(seed);
-  for(size_t i = 0; i < size; i++) fputc(rand() & 0xff, f);
+  uint32_t x = seed * 2654435761u + 1;
+  for(size_t i = 0; i < size; i++){
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    fputc((int) (x & 0xff), f);
+  }
   fclose(f);
+}
+
+/**
+ * @brief  Copies a file.
+ * @param  from Source path.
+ * @param  to   Destination path.
+ * @return True on success, false otherwise.
+ */
+static bool copy_file(const char *from, const char *to){
+  FILE *in = fopen(from, "rb"), *out = fopen(to, "wb");
+  bool ok = in && out;
+  int c;
+  while(ok && (c = fgetc(in)) != EOF) ok = fputc(c, out) != EOF;
+  if(in) fclose(in);
+  if(out && fclose(out) != 0) ok = false;
+  return ok;
 }
 
 /**
@@ -112,9 +140,44 @@ static void check_extract_all(archive *a, const char *out_name){
   }
 }
 
-int main(void){
+/**
+ * @brief Opens a copy of the version 2 fixture and checks its contents.
+ * @param fixtures Folder holding v2.crls.
+ */
+static void check_v2_fixture(const char *fixtures){
+  char source[PATH_MAX], crls[PATH_MAX];
+  join_path(source, sizeof(source), fixtures, "v2.crls");
+  path_in(crls, "v2.crls");
+  CHECK(copy_file(source, crls));
+
+  /* Same seeds as the generator of the fixture. */
+  make_file("empty.bin", 0, 1);
+  make_file("small.txt", 1000, 2);
+  make_file("chunks.bin", 3*CHUNK + 5, 3);
+
+  archive a;
+  archive_init(&a);
+  CHECK(!archive_open(&a, crls, "wrong-password"));
+  CHECK(archive_open(&a, crls, "fixture-password"));
+  CHECK(a.entries.n == 3);
+  if(a.entries.n == 3){
+    CHECK(strcmp(archive_get_entry(&a, 0)->name, "empty.bin") == 0);
+    CHECK(strcmp(archive_get_entry(&a, 1)->name, "small.txt") == 0);
+    CHECK(strcmp(archive_get_entry(&a, 2)->name, "chunks.bin") == 0);
+  }
+  CHECK(archive_wasted_space(&a) > 0);                /* The deleted file and the old indexes. */
+  check_extract_all(&a, "out_v2");
+  archive_free(&a);
+}
+
+int main(int argc, char **argv){
+  if(argc < 2){
+    printf("usage: %s <fixtures folder>\n", argv[0]);
+    return 2;
+  }
   CHECK(archive_crypto_init());
   CHECK(make_temp_dir());
+  check_v2_fixture(argv[1]);
 
   make_file("empty.bin", 0, 1);
   make_file("small.txt", 1000, 2);
