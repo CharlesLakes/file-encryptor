@@ -63,7 +63,7 @@ static int run_command(int argc, char **argv){
   platform_error("Run the command-line modes with file-encryptor-cli.exe.");
   return 2;
 #endif
-  if(strcmp(argv[1], "--server") == 0) return server_main(argc - 1, argv + 1);
+  if(strcmp(argv[1], "--server") == 0) return server_main(std::span<char *const>(argv + 1, static_cast<size_t>(argc - 1)));
   if(strcmp(argv[1], "--upload") == 0) return cli_upload(std::span<char *const>(argv + 1, static_cast<size_t>(argc - 1)));
   usage();
   return strcmp(argv[1], "--help") == 0 ? 0 : 2;

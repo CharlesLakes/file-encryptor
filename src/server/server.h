@@ -51,6 +51,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <span>
 #include <string>
 
 namespace crls{
@@ -78,11 +79,10 @@ int server_run(const server_config &cfg);
 /**
  * @brief  Parses `--server <folder> [--port N] [--bind ADDR] [--max-upload BYTES]
  *         [--timeout SECONDS] [--port-file PATH]` and runs the server.
- * @param  argc Number of arguments, starting at "--server".
- * @param  argv Arguments, starting at "--server".
+ * @param  args Arguments, starting at "--server".
  * @return Process exit code.
  */
-int server_main(int argc, char **argv);
+int server_main(std::span<char *const> args);
 
 }
 

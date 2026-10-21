@@ -8,16 +8,14 @@
 
 #include "server/server.h"
 
-#include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdio>
+#include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
-#include <time.h>
-#include <unistd.h>
 #include "core/append.h"
 #include "core/archive.h"
 #include "core/browser.h"
@@ -29,11 +27,18 @@
 
 namespace crls{
 
+using steady_clock = std::chrono::steady_clock;
+
 /** @brief Slowest accepted upload, in bytes per second. */
 inline constexpr uint64_t MIN_BODY_RATE = 16 * 1024;
 
-/** @brief Scratch buffer used to stream archives. */
-static unsigned char send_chunk[CHUNK];
+/** @brief Longest target written to the log. */
+inline constexpr std::size_t MAX_LOGGED_TARGET = 255;
+
+/* Scratch buffers, static because they are too large for the stack of a
+   Windows thread; the server handles one connection at a time. */
+static std::array<unsigned char, CHUNK> send_chunk;
+static std::array<char, http_max_head> head_buffer;
 
 /* ---------------- Responses ---------------- */
 
@@ -41,34 +46,37 @@ static unsigned char send_chunk[CHUNK];
  * @brief  Sends a status line and headers.
  * @param  s      Socket.
  * @param  status Status code.
- * @param  type   Content-Type, or NULL.
+ * @param  type   Content-Type, or empty for none.
  * @param  length Content-Length.
- * @param  extra  Additional header lines, each ending in CRLF (may be "").
+ * @param  extra  Additional header lines, each ending in CRLF (may be empty).
  * @return True on success, false otherwise.
  */
-static bool send_head(net_socket s, int status, const char *type, uint64_t length, const char *extra){
-  char head[1024];
-  int n = snprintf(head, sizeof(head),
-                   "HTTP/1.1 %d %s\r\nServer: FileEncryptor\r\nConnection: close\r\n"
-                   "Content-Length: %llu\r\n%s%s%s%s\r\n",
-                   status, http_reason(status), (unsigned long long) length,
-                   type ? "Content-Type: " : "", type ? type : "", type ? "\r\n" : "", extra);
-  return n > 0 && (size_t) n < sizeof(head) && net_send_all(s, std::string_view(head, (size_t) n));
+static bool send_head(net_socket s, int status, std::string_view type, uint64_t length, std::string_view extra){
+  std::string head = "HTTP/1.1 " + std::to_string(status) + " " + http_reason(status) + "\r\n"
+                     "Server: FileEncryptor\r\nConnection: close\r\n"
+                     "Content-Length: " + std::to_string(length) + "\r\n";
+  if(!type.empty()){
+    head += "Content-Type: ";
+    head += type;
+    head += "\r\n";
+  }
+  head += extra;
+  head += "\r\n";
+  return net_send_all(s, head);
 }
 
 /**
  * @brief  Sends a complete plain-text response.
  * @param  s         Socket.
  * @param  status    Status code.
- * @param  extra     Additional header lines (may be "").
+ * @param  extra     Additional header lines (may be empty).
  * @param  head_only True for HEAD requests (no body).
  * @return The status code, for logging.
  */
-static int send_error(net_socket s, int status, const char *extra, bool head_only){
-  char body[128];
-  int n = snprintf(body, sizeof(body), "%d %s\n", status, http_reason(status));
-  send_head(s, status, "text/plain; charset=utf-8", (uint64_t) n, extra);
-  if(!head_only) net_send_all(s, std::string_view(body, (size_t) n));
+static int send_error(net_socket s, int status, std::string_view extra, bool head_only){
+  std::string body = std::to_string(status) + " " + http_reason(status) + "\n";
+  send_head(s, status, "text/plain; charset=utf-8", body.size(), extra);
+  if(!head_only) net_send_all(s, body);
   return status;
 }
 
@@ -81,30 +89,24 @@ static int send_error(net_socket s, int status, const char *extra, bool head_onl
  * @param  name Decoded path.
  * @return True if the name is accepted.
  */
-static bool valid_archive_name(const char *name){
-  size_t len = strlen(name);
-  if(len == 0 || len > MAX_NAME || name[0] == '.' || !has_crls_ext(name) || !fs_is_plain_name(name)) return false;
-  for(const char *p = name; *p; p++){
-    char c = *p;
-    bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-              c == '.' || c == '_' || c == '-' || c == ' ';
-    if(!ok) return false;
-  }
-  return true;
+static bool valid_archive_name(std::string_view name){
+  auto allowed = [](char c){
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+           c == '.' || c == '_' || c == '-' || c == ' ';
+  };
+  return !name.empty() && name.size() <= MAX_NAME && !name.starts_with('.') && has_crls_ext(name) &&
+         fs_is_plain_name(name) && std::ranges::all_of(name, allowed);
 }
 
 /**
  * @brief  Builds the quoted ETag of an open archive.
- * @param  fd       File descriptor.
- * @param  out      Destination buffer.
- * @param  out_size Capacity of out.
- * @return True on success, false otherwise.
+ * @param  fd File descriptor.
+ * @return The ETag, or std::nullopt on failure.
  */
-static bool make_etag(int fd, char *out, size_t out_size){
+static std::optional<std::string> make_etag(int fd){
   std::optional<std::string> id = fs_file_id(fd);
-  if(!id) return false;
-  snprintf(out, out_size, "\"%s\"", id->c_str());
-  return true;
+  if(!id) return std::nullopt;
+  return "\"" + *id + "\"";
 }
 
 /**
@@ -113,8 +115,8 @@ static bool make_etag(int fd, char *out, size_t out_size){
  * @param  etag Current ETag, quoted.
  * @return True if there is no If-Match or it matches.
  */
-static bool if_match_ok(const http_request *req, const char *etag){
-  std::optional<std::string_view> value = http_header_value(*req, "If-Match");
+static bool if_match_ok(const http_request &req, std::string_view etag){
+  std::optional<std::string_view> value = http_header_value(req, "If-Match");
   return !value || *value == "*" || *value == etag;
 }
 
@@ -133,19 +135,19 @@ static int serve_listing(const server_config &cfg, net_socket s, bool head_only)
   b.load();
 
   /* The size depends on the folder, so the allocation is checked. */
-  size_t size = 1, len = 0;
+  size_t size = 1;
   for(const dir_item &item : b.items()) size += item.name.size() + 1;
   heap_buffer text;
   if(!text.allocate(size)) return send_error(s, 500, "", head_only);
+  byte_writer out(text.span());
   for(const dir_item &item : b.items()){
-    if(item.is_dir || !valid_archive_name(item.name.c_str())) continue;
-    memcpy(text.data() + len, item.name.data(), item.name.size());
-    len += item.name.size();
-    text.data()[len++] = '\n';
+    if(item.is_dir || !valid_archive_name(item.name)) continue;
+    out.bytes(item.name);
+    out.bytes("\n");
   }
 
-  send_head(s, 200, "text/plain; charset=utf-8", len, "Cache-Control: no-cache\r\n");
-  if(!head_only) net_send_all(s, text.span().first(len));
+  send_head(s, 200, "text/plain; charset=utf-8", out.written(), "Cache-Control: no-cache\r\n");
+  if(!head_only) net_send_all(s, text.span().first(out.written()));
   return 200;
 }
 
@@ -158,26 +160,19 @@ static int serve_listing(const server_config &cfg, net_socket s, bool head_only)
  * @param  head_only True for HEAD.
  * @return Status code.
  */
-static int serve_archive(const server_config &cfg, net_socket s, const http_request *req,
-                         const char *name, bool head_only){
-  char etag[80], extra[512];
+static int serve_archive(const server_config &cfg, net_socket s, const http_request &req,
+                         const std::string &name, bool head_only){
   unique_fd fd = fs_open_regular(join_path(cfg.dir, name), false);
   if(!fd) return send_error(s, 404, "", head_only);
-  if(!make_etag(fd.get(), etag, sizeof(etag))){
-    return send_error(s, 500, "", head_only);
-  }
-  if(!if_match_ok(req, etag)){
-    return send_error(s, 412, "", head_only);
-  }
+  std::optional<std::string> etag = make_etag(fd.get());
+  if(!etag) return send_error(s, 500, "", head_only);
+  if(!if_match_ok(req, *etag)) return send_error(s, 412, "", head_only);
 
   uint64_t size = file_size(fd.get()), first = 0, last = size ? size - 1 : 0;
   int status = 200;
-  if(std::optional<std::string_view> range_header = http_header_value(*req, "Range")){
+  if(std::optional<std::string_view> range_header = http_header_value(req, "Range")){
     std::optional<http_range> range = http_parse_range(*range_header, size);
-    if(!range){
-      snprintf(extra, sizeof(extra), "Content-Range: bytes */%llu\r\n", (unsigned long long) size);
-      return send_error(s, 416, extra, head_only);
-    }
+    if(!range) return send_error(s, 416, "Content-Range: bytes */" + std::to_string(size) + "\r\n", head_only);
     first = range->first;
     last = range->last;
     status = 206;
@@ -185,19 +180,19 @@ static int serve_archive(const server_config &cfg, net_socket s, const http_requ
   uint64_t length = size ? last - first + 1 : 0;
 
   /* On Windows a file locked by the GUI cannot be read: say so before any header. */
-  if(length > 0 && !read_at(fd.get(), std::span(send_chunk, 1), first)){
+  if(length > 0 && !read_at(fd.get(), std::span(send_chunk).first(1), first))
     return send_error(s, 503, "Retry-After: 5\r\n", head_only);
-  }
 
-  int n = snprintf(extra, sizeof(extra), "Accept-Ranges: bytes\r\nETag: %s\r\nCache-Control: no-cache\r\n", etag);
+  std::string extra = "Accept-Ranges: bytes\r\nETag: " + *etag + "\r\nCache-Control: no-cache\r\n";
   if(status == 206)
-    snprintf(extra + n, sizeof(extra) - (size_t) n, "Content-Range: bytes %llu-%llu/%llu\r\n",
-             (unsigned long long) first, (unsigned long long) last, (unsigned long long) size);
+    extra += "Content-Range: bytes " + std::to_string(first) + "-" + std::to_string(last) + "/" +
+             std::to_string(size) + "\r\n";
   bool ok = send_head(s, status, "application/octet-stream", length, extra);
   for(uint64_t sent = 0; ok && !head_only && sent < length; ){
-    size_t chunk = length - sent < sizeof(send_chunk) ? (size_t) (length - sent) : sizeof(send_chunk);
-    ok = read_at(fd.get(), std::span(send_chunk, chunk), first + sent) && net_send_all(s, std::span(send_chunk, chunk));
-    sent += chunk;
+    std::span<unsigned char> chunk =
+        std::span(send_chunk).first(static_cast<size_t>(std::min<uint64_t>(length - sent, send_chunk.size())));
+    ok = read_at(fd.get(), chunk, first + sent) && net_send_all(s, chunk);
+    sent += chunk.size();
   }
   return status;
 }
@@ -210,16 +205,16 @@ static int serve_archive(const server_config &cfg, net_socket s, const http_requ
  */
 class body_reader{
 public:
-  body_reader(net_socket s, std::string_view pending, time_t deadline) noexcept
+  body_reader(net_socket s, std::string_view pending, steady_clock::time_point deadline) noexcept
     : s_(s), pending_(pending), deadline_(deadline) {}
 
   /** @brief Fills buf completely; false if the body ended, failed or took too long. */
   bool operator()(std::span<unsigned char> buf){
-    size_t take = buf.size() < pending_.size() ? buf.size() : pending_.size();
-    memcpy(buf.data(), pending_.data(), take);
+    size_t take = std::min(buf.size(), pending_.size());
+    std::ranges::copy(pending_.substr(0, take), buf.begin());
     pending_.remove_prefix(take);
     for(size_t got = take; got < buf.size(); ){
-      if(time(NULL) > deadline_) return false;
+      if(steady_clock::now() > deadline_) return false;
       std::optional<size_t> n = net_recv(s_, buf.subspan(got));
       if(!n || *n == 0) return false;
       got += *n;
@@ -230,30 +225,31 @@ public:
 private:
   net_socket s_;
   std::string_view pending_;
-  time_t deadline_;
+  steady_clock::time_point deadline_;
 };
 
 /**
  * @brief  Reads the claim of a signed append from the request headers.
  * @param  req Request.
- * @param  c   Output: the claim.
- * @return True if every header is present and well formed.
+ * @return The claim, or std::nullopt if a header is missing or malformed.
  */
-static bool read_claim(const http_request *req, append_claim *c){
-  *c = append_claim();
-  c->content_length = req->content_length;
-  std::optional<std::string_view> base = http_header_value(*req, "X-Crls-Base");
-  std::optional<std::string_view> index_length = http_header_value(*req, "X-Crls-Index-Length");
-  std::optional<std::string_view> nonce = http_header_value(*req, "X-Crls-Index-Nonce");
-  std::optional<std::string_view> hash = http_header_value(*req, "X-Crls-Body-Hash");
-  std::optional<std::string_view> sig = http_header_value(*req, "X-Crls-Sig");
-  if(!base || !index_length || !nonce || !hash || !sig) return false;
+static std::optional<append_claim> read_claim(const http_request &req){
+  std::optional<std::string_view> base = http_header_value(req, "X-Crls-Base");
+  std::optional<std::string_view> index_length = http_header_value(req, "X-Crls-Index-Length");
+  std::optional<std::string_view> nonce = http_header_value(req, "X-Crls-Index-Nonce");
+  std::optional<std::string_view> hash = http_header_value(req, "X-Crls-Body-Hash");
+  std::optional<std::string_view> sig = http_header_value(req, "X-Crls-Sig");
+  if(!base || !index_length || !nonce || !hash || !sig) return std::nullopt;
   std::optional<uint64_t> base_value = http_parse_u64(*base), index_value = http_parse_u64(*index_length);
-  if(!base_value || !index_value) return false;
-  c->base = *base_value;
-  c->index_length = *index_value;
-  return http_hex_decode(*nonce, c->index_nonce) && http_hex_decode(*hash, c->body_hash) &&
-         http_hex_decode(*sig, c->signature);
+  if(!base_value || !index_value) return std::nullopt;
+
+  append_claim c;
+  c.content_length = req.content_length;
+  c.base = *base_value;
+  c.index_length = *index_value;
+  if(!http_hex_decode(*nonce, c.index_nonce) || !http_hex_decode(*hash, c.body_hash) ||
+     !http_hex_decode(*sig, c.signature)) return std::nullopt;
+  return c;
 }
 
 /**
@@ -277,40 +273,36 @@ static int append_status(append_result r){
 /**
  * @brief  Answers a signed append (see core/append.h). The signature is
  *         checked before any byte of the body is read.
- * @param  cfg         Settings.
- * @param  s           Socket.
- * @param  req         Request.
- * @param  name        Validated archive name.
- * @param  pending     Body bytes received with the head.
- * @param  pending_len Number of pending bytes.
+ * @param  cfg     Settings.
+ * @param  s       Socket.
+ * @param  req     Request.
+ * @param  name    Validated archive name.
+ * @param  pending Body bytes received with the head.
  * @return Status code.
  */
-static int serve_append(const server_config &cfg, net_socket s, const http_request *req, const char *name,
-                        const char *pending, size_t pending_len){
-  append_claim claim;
-  if(!req->has_length) return send_error(s, 411, "", false);
-  if(!read_claim(req, &claim)) return send_error(s, 400, "", false);
-  if(claim.content_length > cfg.max_upload) return send_error(s, 413, "", false);
+static int serve_append(const server_config &cfg, net_socket s, const http_request &req, const std::string &name,
+                        std::string_view pending){
+  if(!req.has_length) return send_error(s, 411, "", false);
+  std::optional<append_claim> claim = read_claim(req);
+  if(!claim) return send_error(s, 400, "", false);
+  if(claim->content_length > cfg.max_upload) return send_error(s, 413, "", false);
 
-  char etag[80];
   unique_fd fd = fs_open_regular(join_path(cfg.dir, name), true);
   if(!fd) return send_error(s, 404, "", false);
-  if(!make_etag(fd.get(), etag, sizeof(etag)) || !if_match_ok(req, etag)){
-    return send_error(s, 412, "", false);
-  }
-  if(!fs_lock(fd.get())){
-    return send_error(s, 423, "", false);
-  }
+  std::optional<std::string> etag = make_etag(fd.get());
+  if(!etag || !if_match_ok(req, *etag)) return send_error(s, 412, "", false);
+  if(!fs_lock(fd.get())) return send_error(s, 423, "", false);
 
   append_state st;
   append_result r = append_load_state(fd.get(), st);
-  if(r == append_result::ok) r = append_check(st, claim, cfg.max_upload);
+  if(r == append_result::ok) r = append_check(st, *claim, cfg.max_upload);
   if(r == append_result::ok){
-    if(http_header_value(*req, "Expect") == std::optional<std::string_view>("100-continue"))
+    if(http_header_value(req, "Expect") == std::optional<std::string_view>("100-continue"))
       net_send_all(s, "HTTP/1.1 100 Continue\r\n\r\n");
-    body_reader reader(s, std::string_view(pending, pending_len),
-                       time(NULL) + cfg.timeout + static_cast<time_t>(claim.content_length / MIN_BODY_RATE));
-    r = append_commit(fd.get(), claim, reader);
+    steady_clock::time_point deadline = steady_clock::now() + std::chrono::seconds(cfg.timeout) +
+                                 std::chrono::seconds(claim->content_length / MIN_BODY_RATE);
+    body_reader reader(s, pending, deadline);
+    r = append_commit(fd.get(), *claim, reader);
   }
   return send_error(s, append_status(r), "", false);
 }
@@ -324,9 +316,6 @@ struct request_log{
   std::string target = "-";  /**< Request target, truncated. */
 };
 
-/** @brief Longest target written to the log. */
-inline constexpr std::size_t MAX_LOGGED_TARGET = 255;
-
 /**
  * @brief  Answers one request from a connection.
  * @param  cfg Settings.
@@ -335,21 +324,20 @@ inline constexpr std::size_t MAX_LOGGED_TARGET = 255;
  * @return Status code, or 0 if nothing could be answered.
  */
 static int answer_request(const server_config &cfg, net_socket s, request_log &log){
-  static char head[http_max_head];
   http_request req;
   http_parse parsed = http_parse::incomplete;
   size_t len = 0;
-  time_t deadline = time(NULL) + cfg.timeout;
+  steady_clock::time_point deadline = steady_clock::now() + std::chrono::seconds(cfg.timeout);
 
   while(parsed == http_parse::incomplete){
-    if(len == sizeof(head)){
+    if(len == head_buffer.size()){
       parsed = http_parse::too_large;
       break;
     }
-    std::optional<size_t> n = net_recv(s, std::span(head).subspan(len));
-    if(!n || *n == 0 || time(NULL) > deadline) return len ? send_error(s, 408, "", false) : 0;
+    std::optional<size_t> n = net_recv(s, std::span(head_buffer).subspan(len));
+    if(!n || *n == 0 || steady_clock::now() > deadline) return len ? send_error(s, 408, "", false) : 0;
     len += *n;
-    parsed = http_parse_request(std::string_view(head, len), req);
+    parsed = http_parse_request(std::string_view(head_buffer.data(), len), req);
   }
   if(parsed == http_parse::too_large) return send_error(s, 431, "", false);
   if(parsed == http_parse::unsupported) return send_error(s, 501, "", false);
@@ -360,16 +348,18 @@ static int answer_request(const server_config &cfg, net_socket s, request_log &l
   bool get = req.method == "GET", head_only = req.method == "HEAD", post = req.method == "POST";
   if(!get && !head_only && !post) return send_error(s, 405, "Allow: GET, HEAD, POST\r\n", false);
 
-  std::optional<std::string> decoded = http_decode_path(req.target);
-  if(!decoded) return send_error(s, 400, "", head_only);
-  const std::string &name = *decoded;
-  if(name.empty()){
+  std::optional<std::string> name = http_decode_path(req.target);
+  if(!name) return send_error(s, 400, "", head_only);
+  if(name->empty()){
     if(post) return send_error(s, 405, "Allow: GET, HEAD\r\n", false);
     return serve_listing(cfg, s, head_only);
   }
-  if(!valid_archive_name(name.c_str())) return send_error(s, 404, "", head_only);
-  if(post) return serve_append(cfg, s, &req, name.c_str(), head + req.head_length, len - req.head_length);
-  return serve_archive(cfg, s, &req, name.c_str(), head_only);
+  if(!valid_archive_name(*name)) return send_error(s, 404, "", head_only);
+  if(post){
+    std::string_view pending(head_buffer.data() + req.head_length, len - req.head_length);
+    return serve_append(cfg, s, req, *name, pending);
+  }
+  return serve_archive(cfg, s, req, *name, head_only);
 }
 
 /**
@@ -384,25 +374,32 @@ static request_log handle_connection(const server_config &cfg, net_socket s){
   return log;
 }
 
+/**
+ * @brief  Writes the bound port to a file, for scripts and tests that start
+ *         the server on port 0.
+ * @param  path Path of the file.
+ * @param  port Port.
+ */
+static void write_port_file(const std::string &path, int port){
+  struct file_closer{
+    void operator()(FILE *f) const noexcept{ fclose(f); }
+  };
+  std::unique_ptr<FILE, file_closer> f(fopen(path.c_str(), "w"));
+  if(f) fprintf(f.get(), "%d\n", port);
+}
+
 int server_run(const server_config &cfg){
   if(!net_init()){
     fprintf(stderr, "Could not initialize the network.\n");
     return 1;
   }
   net_listener listener = net_listen(cfg.bind, cfg.port);
-  int port = listener.port;
   if(!listener.socket){
     fprintf(stderr, "Could not listen on %s port %d.\n", cfg.bind.c_str(), cfg.port);
     return 1;
   }
-  if(!cfg.port_file.empty()){
-    FILE *f = fopen(cfg.port_file.c_str(), "w");
-    if(f){
-      fprintf(f, "%d\n", port);
-      fclose(f);
-    }
-  }
-  printf("Serving %s on http://%s:%d/\n", cfg.dir.c_str(), cfg.bind.c_str(), port);
+  if(!cfg.port_file.empty()) write_port_file(cfg.port_file, listener.port);
+  printf("Serving %s on http://%s:%d/\n", cfg.dir.c_str(), cfg.bind.c_str(), listener.port);
   fflush(stdout);
 
   while(!cfg.stop || !cfg.stop->load()){
@@ -428,30 +425,32 @@ static void server_usage(){
           defaults.port, defaults.bind.c_str(), static_cast<unsigned long long>(defaults.max_upload), defaults.timeout);
 }
 
-int server_main(int argc, char **argv){
+int server_main(std::span<char *const> args){
   server_config cfg;
-  if(argc < 2){
+  if(args.size() < 2){
     server_usage();
     return 2;
   }
-  std::optional<std::string> dir = fs_absolute_path(argv[1]);
+  std::optional<std::string> dir = fs_absolute_path(args[1]);
   if(!dir){
-    fprintf(stderr, "Could not find the folder %s.\n", argv[1]);
+    fprintf(stderr, "Could not find the folder %s.\n", args[1]);
     return 2;
   }
   cfg.dir = std::move(*dir);
 
   /* Every option takes a value: they come in pairs. */
-  for(int i = 2; i < argc; i += 2){
-    const char *opt = argv[i], *value = i + 1 < argc ? argv[i + 1] : NULL;
-    std::optional<uint64_t> parsed = value ? http_parse_u64(value) : std::nullopt;
+  for(size_t i = 2; i < args.size(); i += 2){
+    std::string_view opt = args[i];
+    std::optional<std::string_view> value;
+    if(i + 1 < args.size()) value = args[i + 1];
+    std::optional<uint64_t> parsed = value ? http_parse_u64(*value) : std::nullopt;
     bool numeric = parsed.has_value();
     uint64_t number = parsed.value_or(0);
-    if(strcmp(opt, "--port") == 0 && numeric && number <= 65535) cfg.port = (int) number;
-    else if(strcmp(opt, "--bind") == 0 && value) cfg.bind = value;
-    else if(strcmp(opt, "--max-upload") == 0 && numeric) cfg.max_upload = number;
-    else if(strcmp(opt, "--timeout") == 0 && numeric && number > 0 && number < 3600) cfg.timeout = (int) number;
-    else if(strcmp(opt, "--port-file") == 0 && value) cfg.port_file = value;
+    if(opt == "--port" && numeric && number <= 65535) cfg.port = static_cast<int>(number);
+    else if(opt == "--bind" && value) cfg.bind = *value;
+    else if(opt == "--max-upload" && numeric) cfg.max_upload = number;
+    else if(opt == "--timeout" && numeric && number > 0 && number < 3600) cfg.timeout = static_cast<int>(number);
+    else if(opt == "--port-file" && value) cfg.port_file = *value;
     else{
       server_usage();
       return 2;
