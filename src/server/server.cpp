@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <time.h>
@@ -207,30 +208,34 @@ static int serve_archive(const server_config *cfg, net_socket s, const http_requ
 
 /* ---------------- POST ---------------- */
 
-/** @brief State of body_reader(). */
-typedef struct{
-  net_socket s;                    /**< Connection. */
-  const char *pending;             /**< Body bytes already received with the head. */
-  size_t pending_len;              /**< Number of pending bytes. */
-  time_t deadline;                 /**< Time after which the upload is abandoned. */
-}body_ctx;
+/**
+ * @brief Reads a request body: first the bytes that arrived with the head, then
+ *        from the connection, until a deadline.
+ */
+class body_reader{
+public:
+  body_reader(net_socket s, std::string_view pending, time_t deadline) noexcept
+    : s_(s), pending_(pending), deadline_(deadline) {}
 
-/** @brief append_reader over the connection, starting with the pending bytes. */
-static bool body_reader(void *ctx, void *buf, size_t len){
-  body_ctx *b = (body_ctx *) ctx;
-  unsigned char *out = (unsigned char *) buf;
-  size_t take = len < b->pending_len ? len : b->pending_len;
-  memcpy(out, b->pending, take);
-  b->pending += take;
-  b->pending_len -= take;
-  for(size_t got = take; got < len; ){
-    if(time(NULL) > b->deadline) return false;
-    long n = net_recv(b->s, out + got, len - got);
-    if(n <= 0) return false;
-    got += (size_t) n;
+  /** @brief Fills buf completely; false if the body ended, failed or took too long. */
+  bool operator()(std::span<unsigned char> buf){
+    size_t take = buf.size() < pending_.size() ? buf.size() : pending_.size();
+    memcpy(buf.data(), pending_.data(), take);
+    pending_.remove_prefix(take);
+    for(size_t got = take; got < buf.size(); ){
+      if(time(NULL) > deadline_) return false;
+      long n = net_recv(s_, buf.data() + got, buf.size() - got);
+      if(n <= 0) return false;
+      got += static_cast<size_t>(n);
+    }
+    return true;
   }
-  return true;
-}
+
+private:
+  net_socket s_;
+  std::string_view pending_;
+  time_t deadline_;
+};
 
 /**
  * @brief  Reads the claim of a signed append from the request headers.
@@ -262,13 +267,13 @@ static bool read_claim(const http_request *req, append_claim *c){
  */
 static int append_status(append_result r){
   switch(r){
-    case APPEND_OK:          return 204;
-    case APPEND_BAD_REQUEST: return 400;
-    case APPEND_FORBIDDEN:   return 403;
-    case APPEND_CONFLICT:    return 409;
-    case APPEND_TOO_LARGE:   return 413;
-    case APPEND_UNSUPPORTED: return 422;
-    case APPEND_IO:          return 500;
+    case append_result::ok:          return 204;
+    case append_result::bad_request: return 400;
+    case append_result::forbidden:   return 403;
+    case append_result::conflict:    return 409;
+    case append_result::too_large:   return 413;
+    case append_result::unsupported: return 422;
+    case append_result::io:          return 500;
   }
   return 500;
 }
@@ -303,14 +308,14 @@ static int serve_append(const server_config *cfg, net_socket s, const http_reque
   }
 
   append_state st;
-  append_result r = append_load_state(fd.get(), &st);
-  if(r == APPEND_OK) r = append_check(&st, &claim, cfg->max_upload);
-  if(r == APPEND_OK){
+  append_result r = append_load_state(fd.get(), st);
+  if(r == append_result::ok) r = append_check(st, claim, cfg->max_upload);
+  if(r == append_result::ok){
     if(http_header_value(*req, "Expect") == std::optional<std::string_view>("100-continue"))
       net_send_all(s, "HTTP/1.1 100 Continue\r\n\r\n", 25);
-    body_ctx ctx = {s, pending, pending_len,
-                    time(NULL) + cfg->timeout + (time_t) (claim.content_length / MIN_BODY_RATE)};
-    r = append_commit(fd.get(), &st, &claim, body_reader, &ctx);
+    body_reader reader(s, std::string_view(pending, pending_len),
+                       time(NULL) + cfg->timeout + static_cast<time_t>(claim.content_length / MIN_BODY_RATE));
+    r = append_commit(fd.get(), claim, reader);
   }
   return send_error(s, append_status(r), "", false);
 }

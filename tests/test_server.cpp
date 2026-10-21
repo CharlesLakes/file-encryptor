@@ -137,7 +137,7 @@ static int post(const char *target, const append_upload *up, uint64_t send){
   char head[1024];
   post_head(target, up, head);
   unsigned char *body = (unsigned char *) malloc((size_t) up->claim.content_length + 1);
-  read_at(up->body_fd.get(), body, (size_t) up->claim.content_length, 0);
+  read_at(up->body_fd(), body, (size_t) up->claim.content_length, 0);
   response r;
   bool ok = request(head, body, (size_t) send, &r);
   free(body);
@@ -156,7 +156,7 @@ static bool prepare(const char *crls, const char *file, append_upload *up){
   archive a;
   char path[PATH_MAX];
   path_in(path, file);
-  bool ok = a.open(crls, PASSWORD) && append_prepare(&a, path, up);
+  bool ok = a.open(crls, PASSWORD) && up->prepare(a, path);
   a.close();
   return ok;
 }
@@ -241,18 +241,16 @@ int main(int argc, char **argv){
   /* A valid upload. Its body is only the new entry and the new index. */
   append_upload up;
   CHECK(prepare(crls, "second.bin", &up));
-  CHECK(up.claim.content_length == up.entry.stored + up.claim.index_length);
+  CHECK(up.claim.content_length == up.entry().stored + up.claim.index_length);
   CHECK(post("/remote.crls", &up, up.claim.content_length) == 204);
-  append_discard(&up);
 
   /* A signature made without the password. */
   CHECK(a.open(crls, PASSWORD));
   path_in(file, "third.bin");
   memset(a.signing_key().data(), 7, SIGN_SK_BYTES);
-  CHECK(append_prepare(&a, file, &up));
+  CHECK(up.prepare(a, file));
   a.close();
   CHECK(post("/remote.crls", &up, up.claim.content_length) == 403);
-  append_discard(&up);
 
   /* A client that disconnects in the middle of the body changes nothing. */
   fd = open(crls, O_RDONLY | O_BINARY);
@@ -272,14 +270,12 @@ int main(int argc, char **argv){
   CHECK(post("/remote.crls", &up, up.claim.content_length) == 423);
   a.close();
   CHECK(post("/remote.crls", &up, up.claim.content_length) == 204);
-  append_discard(&up);
 
   /* Version 2 archives cannot receive uploads. */
   CHECK(prepare(crls, "third.bin", &up) == false);   /* Already uploaded. */
   make_file("fourth.bin", 10, 24);
   CHECK(prepare(crls, "fourth.bin", &up));
   CHECK(post("/old.crls", &up, up.claim.content_length) == 422);
-  append_discard(&up);
 
   /* The archive now holds the three files, readable with the password. */
   CHECK(a.open(crls, PASSWORD));

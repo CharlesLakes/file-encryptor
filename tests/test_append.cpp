@@ -24,37 +24,27 @@ using namespace crls;
 #define PASSWORD "upload-password"
 #define MAX_BODY (64ULL << 20)
 
-/** @brief State of fd_reader(). */
-typedef struct{
-  int fd;                    /**< File holding the body. */
-  uint64_t position;         /**< Next byte to read. */
-}fd_reader_ctx;
-
-/** @brief append_reader over a file, as the server reads a request body. */
-static bool fd_reader(void *ctx, void *buf, size_t len){
-  fd_reader_ctx *r = (fd_reader_ctx *) ctx;
-  bool ok = read_at(r->fd, buf, len, r->position);
-  r->position += len;
-  return ok;
-}
-
 /**
  * @brief  Runs the server side of an append on the archive at crls.
  * @param  crls Path of the archive (must not be open elsewhere).
  * @param  up   Upload prepared by a client.
- * @return Result of the first step that did not succeed, or APPEND_OK.
+ * @return Result of the first step that did not succeed, or append_result::ok.
  */
 static append_result serve(const char *crls, const append_upload *up){
-  int fd = open(crls, O_RDWR | O_BINARY);
-  if(fd < 0 || !fs_lock(fd)) return APPEND_IO;
+  unique_fd fd(open(crls, O_RDWR | O_BINARY));
+  if(!fd || !fs_lock(fd.get())) return append_result::io;
   append_state st;
-  append_result r = append_load_state(fd, &st);
-  if(r == APPEND_OK) r = append_check(&st, &up->claim, MAX_BODY);
-  if(r == APPEND_OK){
-    fd_reader_ctx ctx = {up->body_fd.get(), 0};
-    r = append_commit(fd, &st, &up->claim, fd_reader, &ctx);
+  append_result r = append_load_state(fd.get(), st);
+  if(r == append_result::ok) r = append_check(st, up->claim, MAX_BODY);
+  if(r == append_result::ok){
+    /* Read the body from the client's temporary file, as the server reads a request. */
+    uint64_t position = 0;
+    r = append_commit(fd.get(), up->claim, [&](std::span<unsigned char> buf){
+      bool ok = read_at(up->body_fd(), buf.data(), buf.size(), position);
+      position += buf.size();
+      return ok;
+    });
   }
-  close(fd);
   return r;
 }
 
@@ -71,7 +61,7 @@ static bool prepare(const char *crls, const char *password, const char *file, ap
   archive a;
   char path[PATH_MAX];
   path_in(path, file);
-  bool ok = a.open(crls, password) && append_prepare(&a, path, up);
+  bool ok = a.open(crls, password) && up->prepare(a, path);
   a.close();
   return ok;
 }
@@ -127,27 +117,24 @@ int main(int argc, char **argv){
      index, never the files that are already there. */
   append_upload up;
   CHECK(prepare(crls, PASSWORD, "second.bin", &up));
-  CHECK(up.claim.content_length == up.entry.stored + up.claim.index_length);
-  CHECK(serve(crls, &up) == APPEND_OK);
-  append_discard(&up);
+  CHECK(up.claim.content_length == up.entry().stored + up.claim.index_length);
+  CHECK(serve(crls, &up) == append_result::ok);
   const char *two[] = {"first.bin", "second.bin"};
   check_contents(crls, two, 2, "out1");
 
   /* A modified signature is rejected. */
   CHECK(prepare(crls, PASSWORD, "third.txt", &up));
   up.claim.signature[5] ^= 1;
-  CHECK(serve(crls, &up) == APPEND_FORBIDDEN);
-  append_discard(&up);
+  CHECK(serve(crls, &up) == append_result::forbidden);
 
   /* So is a signature made without the password: a client that opened the
      archive cannot sign once its secret key is replaced. */
   CHECK(a.open(crls, PASSWORD));
   path_in(file, "third.txt");
   randombytes_buf(a.signing_key().data(), SIGN_SK_BYTES);
-  CHECK(append_prepare(&a, file, &up));
+  CHECK(up.prepare(a, file));
   a.close();
-  CHECK(serve(crls, &up) == APPEND_FORBIDDEN);
-  append_discard(&up);
+  CHECK(serve(crls, &up) == append_result::forbidden);
   check_contents(crls, two, 2, "out2");
 
   /* A wrong password cannot even open the archive to prepare an upload. */
@@ -158,14 +145,12 @@ int main(int argc, char **argv){
   append_upload up_a, up_b;
   CHECK(prepare(crls, PASSWORD, "third.txt", &up_a));
   CHECK(prepare(crls, PASSWORD, "fourth.bin", &up_b));
-  CHECK(serve(crls, &up_a) == APPEND_OK);
-  CHECK(serve(crls, &up_b) == APPEND_CONFLICT);
+  CHECK(serve(crls, &up_a) == append_result::ok);
+  CHECK(serve(crls, &up_b) == append_result::conflict);
   CHECK(a.open(crls, PASSWORD));
-  CHECK(append_rebase(&a, &up_b));
+  CHECK(up_b.rebase(a));
   a.close();
-  CHECK(serve(crls, &up_b) == APPEND_OK);
-  append_discard(&up_a);
-  append_discard(&up_b);
+  CHECK(serve(crls, &up_b) == append_result::ok);
   const char *four[] = {"first.bin", "second.bin", "third.txt", "fourth.bin"};
   check_contents(crls, four, 4, "out3");
 
@@ -179,30 +164,27 @@ int main(int argc, char **argv){
   close(fd);
   CHECK(prepare(crls, PASSWORD, "fifth.bin", &up));
   unsigned char byte;
-  CHECK(read_at(up.body_fd.get(), &byte, 1, 10));
+  CHECK(read_at(up.body_fd(), &byte, 1, 10));
   byte ^= 1;
-  CHECK(write_at(up.body_fd.get(), &byte, 1, 10));
-  CHECK(serve(crls, &up) == APPEND_BAD_REQUEST);
+  CHECK(write_at(up.body_fd(), &byte, 1, 10));
+  CHECK(serve(crls, &up) == append_result::bad_request);
   fd = open(crls, O_RDONLY | O_BINARY);
   CHECK(file_size(fd) == size_before);
   close(fd);
-  append_discard(&up);
 
   /* An index length out of bounds is rejected before the signature. */
   CHECK(prepare(crls, PASSWORD, "fifth.bin", &up));
   up.claim.index_length = 3;
-  CHECK(serve(crls, &up) == APPEND_BAD_REQUEST);
+  CHECK(serve(crls, &up) == append_result::bad_request);
   up.claim.index_length = up.claim.content_length + 1;
-  CHECK(serve(crls, &up) == APPEND_BAD_REQUEST);
-  append_discard(&up);
+  CHECK(serve(crls, &up) == append_result::bad_request);
 
   /* Bytes left after the index by an interrupted upload are removed. */
   fd = open(crls, O_RDWR | O_BINARY);
   CHECK(write_at(fd, "garbage", 7, size_before));
   close(fd);
   CHECK(prepare(crls, PASSWORD, "fifth.bin", &up));
-  CHECK(serve(crls, &up) == APPEND_OK);
-  append_discard(&up);
+  CHECK(serve(crls, &up) == append_result::ok);
   const char *five[] = {"first.bin", "second.bin", "third.txt", "fourth.bin", "fifth.bin"};
   check_contents(crls, five, 5, "out4");
 
@@ -213,11 +195,11 @@ int main(int argc, char **argv){
   CHECK(copy_file(source, v2));
   fd = open(v2, O_RDWR | O_BINARY);
   append_state st;
-  CHECK(append_load_state(fd, &st) == APPEND_UNSUPPORTED);
+  CHECK(append_load_state(fd, st) == append_result::unsupported);
   close(fd);
   CHECK(a.open(v2, "fixture-password"));
   path_in(file, "fifth.bin");
-  CHECK(!append_prepare(&a, file, &up));
+  CHECK(!up.prepare(a, file));
   a.close();
 
   remove_temp_dir();

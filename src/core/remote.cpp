@@ -210,7 +210,7 @@ static bool send_upload(remote_source *c, const append_upload *up, http_response
   const char *headers[] = {"Content-Type: application/octet-stream", base.c_str(), index_length.c_str(),
                            nonce.c_str(), hash.c_str(), sig.c_str(), c->etag().empty() ? NULL : if_match.c_str(), NULL};
 
-  http_request_spec req = {"POST", c->url().c_str(), headers, up->body_fd.get(), up->claim.content_length, NULL, NULL};
+  http_request_spec req = {"POST", c->url().c_str(), headers, up->body_fd(), up->claim.content_length, NULL, NULL};
   if(http_perform(&req, resp)) return true;
   set_status(true, "Could not upload to %s: %s", c->url().c_str(), resp->error);
   return false;
@@ -223,7 +223,7 @@ bool remote_add_file(archive *a, const char *path){
     set_status(true, "This archive is not remote.");
     return false;
   }
-  if(!append_prepare(a, path, &up)) return false;
+  if(!up.prepare(*a, path)) return false;
 
   bool ok = false;
   int attempt;
@@ -231,14 +231,14 @@ bool remote_add_file(archive *a, const char *path){
     http_response resp;
     if(!send_upload(c, &up, &resp)) break;
     if(resp.status == 204){
-      append_applied(a, &up);
+      up.applied(*a);
       c->grew(up.claim.base + up.claim.content_length);
       ok = true;
       break;
     }
     if(resp.status == 409){
       /* Someone else uploaded first: build the index again on top of theirs. */
-      if(!c->refresh() || !a->reload() || !append_rebase(a, &up)) break;
+      if(!c->refresh() || !a->reload() || !up.rebase(*a)) break;
       continue;
     }
     switch(resp.status){
@@ -257,10 +257,9 @@ bool remote_add_file(archive *a, const char *path){
 
   if(ok){
     char size_text[32];
-    format_size(up.entry.size, size_text, sizeof(size_text));
-    set_status(false, "Uploaded %s (%s).", up.entry.name.c_str(), size_text);
+    format_size(up.entry().size, size_text, sizeof(size_text));
+    set_status(false, "Uploaded %s (%s).", up.entry().name.c_str(), size_text);
   }
-  append_discard(&up);
   return ok;
 }
 
