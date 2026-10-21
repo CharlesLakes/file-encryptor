@@ -8,20 +8,26 @@
 
 #include "core/net.h"
 
+#include <csignal>
+#include <memory>
 #include <netdb.h>
-#include <signal.h>
-#include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include "lib/function_ref.h"
+#include "lib/unique_fd.h"
 
 namespace crls{
 
-bool net_init(void){
-  return signal(SIGPIPE, SIG_IGN) != SIG_ERR;
+bool net_init(){
+  return std::signal(SIGPIPE, SIG_IGN) != SIG_ERR;
 }
+
+/** @brief Deleter of an address list from getaddrinfo(). */
+struct addrinfo_deleter{
+  void operator()(addrinfo *list) const noexcept{ freeaddrinfo(list); }
+};
 
 /**
  * @brief  Returns the port a socket is bound to.
@@ -29,91 +35,90 @@ bool net_init(void){
  * @return Port, or -1 on error.
  */
 static int local_port(int s){
-  struct sockaddr_storage addr;
+  sockaddr_storage addr;
   socklen_t len = sizeof(addr);
-  if(getsockname(s, (struct sockaddr *) &addr, &len) != 0) return -1;
-  if(addr.ss_family == AF_INET) return ntohs(((struct sockaddr_in *) &addr)->sin_port);
-  if(addr.ss_family == AF_INET6) return ntohs(((struct sockaddr_in6 *) &addr)->sin6_port);
+  if(getsockname(s, reinterpret_cast<sockaddr *>(&addr), &len) != 0) return -1;
+  if(addr.ss_family == AF_INET) return ntohs(reinterpret_cast<const sockaddr_in *>(&addr)->sin_port);
+  if(addr.ss_family == AF_INET6) return ntohs(reinterpret_cast<const sockaddr_in6 *>(&addr)->sin6_port);
   return -1;
 }
 
-unique_socket net_listen(const char *address, int port, int *bound_port){
-  struct addrinfo hints, *list;
-  char service[16];
-  memset(&hints, 0, sizeof(hints));
+/**
+ * @brief  Resolves host and port and returns the first address for which a
+ *         socket can be created and set up.
+ * @param  host  Host name or address (nullptr for any, with AI_PASSIVE).
+ * @param  port  Port.
+ * @param  flags getaddrinfo() flags.
+ * @param  setup Binds or connects the socket; returns false to try the next
+ *               address.
+ * @return The socket, empty if no address worked.
+ */
+static unique_socket first_socket(const char *host, int port, int flags,
+                                  function_ref<bool(int s, const addrinfo &ai)> setup){
+  addrinfo hints{};
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST | AI_NUMERICSERV;
-  snprintf(service, sizeof(service), "%d", port);
-  if(getaddrinfo(address, service, &hints, &list) != 0) return unique_socket();
+  hints.ai_flags = flags;
+  addrinfo *found = nullptr;
+  if(getaddrinfo(host, std::to_string(port).c_str(), &hints, &found) != 0) return unique_socket();
+  std::unique_ptr<addrinfo, addrinfo_deleter> list(found);
 
-  int s = -1;
-  for(struct addrinfo *ai = list; ai && s < 0; ai = ai->ai_next){
-    s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-    if(s < 0) continue;
+  for(const addrinfo *ai = list.get(); ai; ai = ai->ai_next){
+    unique_fd s(socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol));
+    if(s && setup(s.get(), *ai)) return unique_socket(s.release());
+  }
+  return unique_socket();
+}
+
+net_listener net_listen(const std::string &address, int port){
+  net_listener out;
+  out.socket = first_socket(address.c_str(), port, AI_PASSIVE | AI_NUMERICHOST | AI_NUMERICSERV,
+                            [](int s, const addrinfo &ai){
     /* Allows restarting the server while old connections are in TIME_WAIT. */
     int on = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
-    if(bind(s, ai->ai_addr, ai->ai_addrlen) != 0 || listen(s, 16) != 0){
-      close(s);
-      s = -1;
-    }
-  }
-  freeaddrinfo(list);
-  if(s >= 0 && bound_port) *bound_port = local_port(s);
-  return unique_socket(s < 0 ? NET_INVALID : (net_socket) s);
+    return bind(s, ai.ai_addr, ai.ai_addrlen) == 0 && listen(s, 16) == 0;
+  });
+  if(out.socket) out.port = local_port(static_cast<int>(out.socket.get()));
+  return out;
 }
 
 unique_socket net_accept(net_socket listener){
-  int s = accept((int) listener, NULL, NULL);
-  return unique_socket(s < 0 ? NET_INVALID : (net_socket) s);
+  int s = accept(static_cast<int>(listener), nullptr, nullptr);
+  return unique_socket(s < 0 ? NET_INVALID : s);
 }
 
-unique_socket net_connect(const char *host, int port){
-  struct addrinfo hints, *list;
-  char service[16];
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  snprintf(service, sizeof(service), "%d", port);
-  if(getaddrinfo(host, service, &hints, &list) != 0) return unique_socket();
-
-  int s = -1;
-  for(struct addrinfo *ai = list; ai && s < 0; ai = ai->ai_next){
-    s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-    if(s >= 0 && connect(s, ai->ai_addr, ai->ai_addrlen) != 0){
-      close(s);
-      s = -1;
-    }
-  }
-  freeaddrinfo(list);
-  return unique_socket(s < 0 ? NET_INVALID : (net_socket) s);
+unique_socket net_connect(const std::string &host, int port){
+  return first_socket(host.c_str(), port, 0, [](int s, const addrinfo &ai){
+    return connect(s, ai.ai_addr, ai.ai_addrlen) == 0;
+  });
 }
 
 bool net_set_timeout(net_socket s, int seconds){
-  struct timeval tv = {seconds, 0};
-  return setsockopt((int) s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0 &&
-         setsockopt((int) s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) == 0;
+  timeval tv{};
+  tv.tv_sec = seconds;
+  int fd = static_cast<int>(s);
+  return setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0 &&
+         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) == 0;
 }
 
-long net_recv(net_socket s, void *buf, size_t len){
-  ssize_t n = recv((int) s, buf, len, 0);
-  return n < 0 ? -1 : (long) n;
+std::optional<std::size_t> net_recv(net_socket s, std::span<unsigned char> buf){
+  ssize_t n = recv(static_cast<int>(s), buf.data(), buf.size(), 0);
+  if(n < 0) return std::nullopt;
+  return static_cast<std::size_t>(n);
 }
 
-bool net_send_all(net_socket s, const void *buf, size_t len){
-  const char *p = (const char *) buf;
-  while(len > 0){
-    ssize_t n = send((int) s, p, len, MSG_NOSIGNAL);
+bool net_send_all(net_socket s, std::span<const unsigned char> buf){
+  while(!buf.empty()){
+    ssize_t n = send(static_cast<int>(s), buf.data(), buf.size(), MSG_NOSIGNAL);
     if(n <= 0) return false;
-    p += n;
-    len -= (size_t) n;
+    buf = buf.subspan(static_cast<std::size_t>(n));
   }
   return true;
 }
 
 void net_close(net_socket s){
-  if(s != NET_INVALID) close((int) s);
+  if(s != NET_INVALID) close(static_cast<int>(s));
 }
 
 }

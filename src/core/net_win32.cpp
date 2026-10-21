@@ -11,16 +11,34 @@
 
 #include "core/net.h"
 
-#include <stdio.h>
-#include <string.h>
+#include <algorithm>
+#include <memory>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include "lib/function_ref.h"
 
 namespace crls{
 
-bool net_init(void){
+/** @brief Largest transfer passed to a single recv() or send() call. */
+inline constexpr std::size_t MAX_TRANSFER = 1u << 30;
+
+bool net_init(){
   WSADATA data;
   return WSAStartup(MAKEWORD(2, 2), &data) == 0;
+}
+
+/** @brief Deleter of an address list from getaddrinfo(). */
+struct addrinfo_deleter{
+  void operator()(addrinfo *list) const noexcept{ freeaddrinfo(list); }
+};
+
+/**
+ * @brief  Returns the Winsock handle behind a socket.
+ * @param  s Socket.
+ * @return The SOCKET.
+ */
+static SOCKET to_socket(net_socket s){
+  return static_cast<SOCKET>(s);
 }
 
 /**
@@ -29,93 +47,93 @@ bool net_init(void){
  * @return Port, or -1 on error.
  */
 static int local_port(SOCKET s){
-  struct sockaddr_storage addr;
+  sockaddr_storage addr;
   int len = sizeof(addr);
-  if(getsockname(s, (struct sockaddr *) &addr, &len) != 0) return -1;
-  if(addr.ss_family == AF_INET) return ntohs(((struct sockaddr_in *) &addr)->sin_port);
-  if(addr.ss_family == AF_INET6) return ntohs(((struct sockaddr_in6 *) &addr)->sin6_port);
+  if(getsockname(s, reinterpret_cast<sockaddr *>(&addr), &len) != 0) return -1;
+  if(addr.ss_family == AF_INET) return ntohs(reinterpret_cast<const sockaddr_in *>(&addr)->sin_port);
+  if(addr.ss_family == AF_INET6) return ntohs(reinterpret_cast<const sockaddr_in6 *>(&addr)->sin6_port);
   return -1;
 }
 
-unique_socket net_listen(const char *address, int port, int *bound_port){
-  struct addrinfo hints, *list;
-  char service[16];
-  memset(&hints, 0, sizeof(hints));
+/**
+ * @brief  Resolves host and port and returns the first address for which a
+ *         socket can be created and set up.
+ * @param  host  Host name or address (nullptr for any, with AI_PASSIVE).
+ * @param  port  Port.
+ * @param  flags getaddrinfo() flags.
+ * @param  setup Binds or connects the socket; returns false to try the next
+ *               address.
+ * @return The socket, empty if no address worked.
+ */
+static unique_socket first_socket(const char *host, int port, int flags,
+                                  function_ref<bool(SOCKET s, const addrinfo &ai)> setup){
+  addrinfo hints{};
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST | AI_NUMERICSERV;
-  snprintf(service, sizeof(service), "%d", port);
-  if(getaddrinfo(address, service, &hints, &list) != 0) return unique_socket();
+  hints.ai_flags = flags;
+  addrinfo *found = nullptr;
+  if(getaddrinfo(host, std::to_string(port).c_str(), &hints, &found) != 0) return unique_socket();
+  std::unique_ptr<addrinfo, addrinfo_deleter> list(found);
 
-  SOCKET s = INVALID_SOCKET;
-  for(struct addrinfo *ai = list; ai && s == INVALID_SOCKET; ai = ai->ai_next){
-    s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+  for(const addrinfo *ai = list.get(); ai; ai = ai->ai_next){
+    SOCKET s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
     if(s == INVALID_SOCKET) continue;
-    BOOL on = TRUE;
-    setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char *) &on, sizeof(on));
-    if(bind(s, ai->ai_addr, (int) ai->ai_addrlen) != 0 || listen(s, 16) != 0){
-      closesocket(s);
-      s = INVALID_SOCKET;
-    }
+    unique_socket owned(static_cast<net_socket>(s));
+    if(setup(s, *ai)) return owned;
   }
-  freeaddrinfo(list);
-  if(s != INVALID_SOCKET && bound_port) *bound_port = local_port(s);
-  return unique_socket(s == INVALID_SOCKET ? NET_INVALID : (net_socket) s);
+  return unique_socket();
+}
+
+net_listener net_listen(const std::string &address, int port){
+  net_listener out;
+  out.socket = first_socket(address.c_str(), port, AI_PASSIVE | AI_NUMERICHOST | AI_NUMERICSERV,
+                            [](SOCKET s, const addrinfo &ai){
+    BOOL on = TRUE;
+    setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char *>(&on), sizeof(on));
+    return bind(s, ai.ai_addr, static_cast<int>(ai.ai_addrlen)) == 0 && listen(s, 16) == 0;
+  });
+  if(out.socket) out.port = local_port(to_socket(out.socket.get()));
+  return out;
 }
 
 unique_socket net_accept(net_socket listener){
-  SOCKET s = accept((SOCKET) listener, NULL, NULL);
-  return unique_socket(s == INVALID_SOCKET ? NET_INVALID : (net_socket) s);
+  SOCKET s = accept(to_socket(listener), nullptr, nullptr);
+  return unique_socket(s == INVALID_SOCKET ? NET_INVALID : static_cast<net_socket>(s));
 }
 
-unique_socket net_connect(const char *host, int port){
-  struct addrinfo hints, *list;
-  char service[16];
-  memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_socktype = SOCK_STREAM;
-  snprintf(service, sizeof(service), "%d", port);
-  if(getaddrinfo(host, service, &hints, &list) != 0) return unique_socket();
-
-  SOCKET s = INVALID_SOCKET;
-  for(struct addrinfo *ai = list; ai && s == INVALID_SOCKET; ai = ai->ai_next){
-    s = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-    if(s != INVALID_SOCKET && connect(s, ai->ai_addr, (int) ai->ai_addrlen) != 0){
-      closesocket(s);
-      s = INVALID_SOCKET;
-    }
-  }
-  freeaddrinfo(list);
-  return unique_socket(s == INVALID_SOCKET ? NET_INVALID : (net_socket) s);
+unique_socket net_connect(const std::string &host, int port){
+  return first_socket(host.c_str(), port, 0, [](SOCKET s, const addrinfo &ai){
+    return connect(s, ai.ai_addr, static_cast<int>(ai.ai_addrlen)) == 0;
+  });
 }
 
 bool net_set_timeout(net_socket s, int seconds){
   /* Winsock takes the timeout in milliseconds, as a DWORD. */
-  DWORD ms = (DWORD) seconds * 1000;
-  return setsockopt((SOCKET) s, SOL_SOCKET, SO_RCVTIMEO, (const char *) &ms, sizeof(ms)) == 0 &&
-         setsockopt((SOCKET) s, SOL_SOCKET, SO_SNDTIMEO, (const char *) &ms, sizeof(ms)) == 0;
+  DWORD ms = static_cast<DWORD>(seconds) * 1000;
+  const char *value = reinterpret_cast<const char *>(&ms);
+  return setsockopt(to_socket(s), SOL_SOCKET, SO_RCVTIMEO, value, sizeof(ms)) == 0 &&
+         setsockopt(to_socket(s), SOL_SOCKET, SO_SNDTIMEO, value, sizeof(ms)) == 0;
 }
 
-long net_recv(net_socket s, void *buf, size_t len){
-  int want = len > 1 << 30 ? 1 << 30 : (int) len;
-  int n = recv((SOCKET) s, (char *) buf, want, 0);
-  return n < 0 ? -1 : (long) n;
+std::optional<std::size_t> net_recv(net_socket s, std::span<unsigned char> buf){
+  int want = static_cast<int>(std::min(buf.size(), MAX_TRANSFER));
+  int n = recv(to_socket(s), reinterpret_cast<char *>(buf.data()), want, 0);
+  if(n < 0) return std::nullopt;
+  return static_cast<std::size_t>(n);
 }
 
-bool net_send_all(net_socket s, const void *buf, size_t len){
-  const char *p = (const char *) buf;
-  while(len > 0){
-    int want = len > 1 << 30 ? 1 << 30 : (int) len;
-    int n = send((SOCKET) s, p, want, 0);
+bool net_send_all(net_socket s, std::span<const unsigned char> buf){
+  while(!buf.empty()){
+    int want = static_cast<int>(std::min(buf.size(), MAX_TRANSFER));
+    int n = send(to_socket(s), reinterpret_cast<const char *>(buf.data()), want, 0);
     if(n <= 0) return false;
-    p += n;
-    len -= (size_t) n;
+    buf = buf.subspan(static_cast<std::size_t>(n));
   }
   return true;
 }
 
 void net_close(net_socket s){
-  if(s != NET_INVALID) closesocket((SOCKET) s);
+  if(s != NET_INVALID) closesocket(to_socket(s));
 }
 
 }

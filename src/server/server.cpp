@@ -53,7 +53,7 @@ static bool send_head(net_socket s, int status, const char *type, uint64_t lengt
                    "Content-Length: %llu\r\n%s%s%s%s\r\n",
                    status, http_reason(status), (unsigned long long) length,
                    type ? "Content-Type: " : "", type ? type : "", type ? "\r\n" : "", extra);
-  return n > 0 && (size_t) n < sizeof(head) && net_send_all(s, head, (size_t) n);
+  return n > 0 && (size_t) n < sizeof(head) && net_send_all(s, std::string_view(head, (size_t) n));
 }
 
 /**
@@ -68,7 +68,7 @@ static int send_error(net_socket s, int status, const char *extra, bool head_onl
   char body[128];
   int n = snprintf(body, sizeof(body), "%d %s\n", status, http_reason(status));
   send_head(s, status, "text/plain; charset=utf-8", (uint64_t) n, extra);
-  if(!head_only) net_send_all(s, body, (size_t) n);
+  if(!head_only) net_send_all(s, std::string_view(body, (size_t) n));
   return status;
 }
 
@@ -145,7 +145,7 @@ static int serve_listing(const server_config &cfg, net_socket s, bool head_only)
   }
 
   send_head(s, 200, "text/plain; charset=utf-8", len, "Cache-Control: no-cache\r\n");
-  if(!head_only) net_send_all(s, text.data(), len);
+  if(!head_only) net_send_all(s, text.span().first(len));
   return 200;
 }
 
@@ -196,7 +196,7 @@ static int serve_archive(const server_config &cfg, net_socket s, const http_requ
   bool ok = send_head(s, status, "application/octet-stream", length, extra);
   for(uint64_t sent = 0; ok && !head_only && sent < length; ){
     size_t chunk = length - sent < sizeof(send_chunk) ? (size_t) (length - sent) : sizeof(send_chunk);
-    ok = read_at(fd.get(), std::span(send_chunk, chunk), first + sent) && net_send_all(s, send_chunk, chunk);
+    ok = read_at(fd.get(), std::span(send_chunk, chunk), first + sent) && net_send_all(s, std::span(send_chunk, chunk));
     sent += chunk;
   }
   return status;
@@ -220,9 +220,9 @@ public:
     pending_.remove_prefix(take);
     for(size_t got = take; got < buf.size(); ){
       if(time(NULL) > deadline_) return false;
-      long n = net_recv(s_, buf.data() + got, buf.size() - got);
-      if(n <= 0) return false;
-      got += static_cast<size_t>(n);
+      std::optional<size_t> n = net_recv(s_, buf.subspan(got));
+      if(!n || *n == 0) return false;
+      got += *n;
     }
     return true;
   }
@@ -307,7 +307,7 @@ static int serve_append(const server_config &cfg, net_socket s, const http_reque
   if(r == append_result::ok) r = append_check(st, claim, cfg.max_upload);
   if(r == append_result::ok){
     if(http_header_value(*req, "Expect") == std::optional<std::string_view>("100-continue"))
-      net_send_all(s, "HTTP/1.1 100 Continue\r\n\r\n", 25);
+      net_send_all(s, "HTTP/1.1 100 Continue\r\n\r\n");
     body_reader reader(s, std::string_view(pending, pending_len),
                        time(NULL) + cfg.timeout + static_cast<time_t>(claim.content_length / MIN_BODY_RATE));
     r = append_commit(fd.get(), claim, reader);
@@ -337,9 +337,9 @@ static int handle_connection(const server_config &cfg, net_socket s, char *metho
       parsed = http_parse::too_large;
       break;
     }
-    long n = net_recv(s, head + len, sizeof(head) - len);
-    if(n <= 0 || time(NULL) > deadline) return len ? send_error(s, 408, "", false) : 0;
-    len += (size_t) n;
+    std::optional<size_t> n = net_recv(s, std::span(head).subspan(len));
+    if(!n || *n == 0 || time(NULL) > deadline) return len ? send_error(s, 408, "", false) : 0;
+    len += *n;
     parsed = http_parse_request(std::string_view(head, len), req);
   }
   if(parsed == http_parse::too_large) return send_error(s, 431, "", false);
@@ -368,9 +368,9 @@ int server_run(const server_config &cfg){
     fprintf(stderr, "Could not initialize the network.\n");
     return 1;
   }
-  int port = 0;
-  unique_socket listener = net_listen(cfg.bind.c_str(), cfg.port, &port);
-  if(!listener){
+  net_listener listener = net_listen(cfg.bind, cfg.port);
+  int port = listener.port;
+  if(!listener.socket){
     fprintf(stderr, "Could not listen on %s port %d.\n", cfg.bind.c_str(), cfg.port);
     return 1;
   }
@@ -385,12 +385,12 @@ int server_run(const server_config &cfg){
   fflush(stdout);
 
   while(!cfg.stop || !cfg.stop->load()){
-    unique_socket s = net_accept(listener.get());
+    unique_socket s = net_accept(listener.socket.get());
     if(!s) continue;
     net_set_timeout(s.get(), cfg.timeout);
     char method[16] = "-", target[256] = "-";
     int status = handle_connection(cfg, s.get(), method, target);
-    s = unique_socket();
+    s.reset();
     if(status) printf("%s %s %d\n", method, target, status);
     fflush(stdout);
   }

@@ -82,9 +82,9 @@ test_server::~test_server(){
   stop_flag = true;
   unique_socket s = net_connect("127.0.0.1", bound_port);
   if(s){
-    net_send_all(s.get(), "HEAD / HTTP/1.1\r\n\r\n", 19);
+    net_send_all(s.get(), "HEAD / HTTP/1.1\r\n\r\n");
     char buf[256];
-    while(net_recv(s.get(), buf, sizeof(buf)) > 0){}
+    while(net_recv(s.get(), std::span(buf)).value_or(0) > 0){}
   }
 #ifdef _WIN32
   WaitForSingleObject(thread, INFINITE);

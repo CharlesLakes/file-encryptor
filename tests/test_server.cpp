@@ -51,13 +51,14 @@ static bool request(const char *head, const void *body, size_t body_len, respons
   unique_socket s = net_connect("127.0.0.1", port);
   if(!s) return false;
   net_set_timeout(s.get(), 10);
-  bool ok = net_send_all(s.get(), head, strlen(head)) && (!body || net_send_all(s.get(), body, body_len));
+  bool ok = net_send_all(s.get(), std::string_view(head)) &&
+            (!body || net_send_all(s.get(), {static_cast<const unsigned char *>(body), body_len}));
 
   std::string received;
-  char chunk[1 << 16];
-  long n;
-  while(ok && (n = net_recv(s.get(), chunk, sizeof(chunk))) > 0) received.append(chunk, static_cast<size_t>(n));
-  s = unique_socket();
+  std::vector<char> chunk(1 << 16);
+  std::optional<size_t> n;
+  while(ok && (n = net_recv(s.get(), std::span(chunk))) && *n > 0) received.append(chunk.data(), *n);
+  s.reset();
 
   size_t end = received.find("\r\n\r\n");
   /* Skip an interim 100 Continue response. */

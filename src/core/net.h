@@ -19,14 +19,18 @@
 #ifndef CORE_NET_H
 #define CORE_NET_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
 
 namespace crls{
 
 /** @brief A socket: a descriptor on POSIX, a SOCKET on Windows. */
-typedef intptr_t net_socket;
+using net_socket = intptr_t;
 
 inline constexpr net_socket NET_INVALID = -1;   /**< Value of an invalid socket. */
 
@@ -51,19 +55,24 @@ public:
   unique_socket(const unique_socket &) = delete;
   unique_socket& operator=(const unique_socket &) = delete;
 
-  unique_socket(unique_socket &&other) noexcept : s_(other.s_){ other.s_ = NET_INVALID; }
+  unique_socket(unique_socket &&other) noexcept : s_(std::exchange(other.s_, NET_INVALID)) {}
 
   unique_socket& operator=(unique_socket &&other) noexcept{
-    if(this != &other){
-      net_close(s_);
-      s_ = other.s_;
-      other.s_ = NET_INVALID;
-    }
+    if(this != &other) reset(std::exchange(other.s_, NET_INVALID));
     return *this;
   }
 
   /** @brief Returns the socket without giving up ownership. */
   net_socket get() const noexcept{ return s_; }
+
+  /**
+   * @brief Closes the owned socket and takes ownership of s instead.
+   * @param s New socket, NET_INVALID by default.
+   */
+  void reset(net_socket s = NET_INVALID) noexcept{
+    net_close(s_);
+    s_ = s;
+  }
 
   /** @brief True if a socket is owned. */
   explicit operator bool() const noexcept{ return s_ != NET_INVALID; }
@@ -72,21 +81,26 @@ private:
   net_socket s_ = NET_INVALID;
 };
 
+/** @brief A listening socket and the port it is bound to. */
+struct net_listener{
+  unique_socket socket;      /**< Listening socket, empty on error. */
+  int port = 0;              /**< Port actually bound. */
+};
+
 /**
  * @brief  Prepares the socket library (Winsock startup; ignoring SIGPIPE on
  *         POSIX, so that a client closing early cannot kill the process).
  * @return True on success, false otherwise.
  */
-bool       net_init(void);
+bool       net_init();
 
 /**
  * @brief  Creates a listening socket.
- * @param  address    Address to bind, e.g. "127.0.0.1", "0.0.0.0" or "::".
- * @param  port       Port, or 0 to let the system choose one.
- * @param  bound_port Output: the port actually bound (may be NULL).
- * @return Listening socket, empty on error.
+ * @param  address Address to bind, e.g. "127.0.0.1", "0.0.0.0" or "::".
+ * @param  port    Port, or 0 to let the system choose one.
+ * @return The socket and its port; the socket is empty on error.
  */
-unique_socket net_listen(const char *address, int port, int *bound_port);
+net_listener net_listen(const std::string &address, int port);
 
 /**
  * @brief  Waits for the next connection.
@@ -101,7 +115,7 @@ unique_socket net_accept(net_socket listener);
  * @param  port Port.
  * @return Connected socket, empty on error.
  */
-unique_socket net_connect(const char *host, int port);
+unique_socket net_connect(const std::string &host, int port);
 
 /**
  * @brief  Sets the receive and send timeouts of a socket.
@@ -112,23 +126,31 @@ unique_socket net_connect(const char *host, int port);
 bool       net_set_timeout(net_socket s, int seconds);
 
 /**
- * @brief  Receives up to len bytes.
+ * @brief  Receives up to buf.size() bytes.
  * @param  s   Socket.
- * @param  buf Destination buffer.
- * @param  len Capacity of buf.
- * @return Number of bytes received, 0 if the peer closed the connection, or
- *         -1 on error or timeout.
+ * @param  buf Destination.
+ * @return Number of bytes received (0 if the peer closed the connection), or
+ *         std::nullopt on error or timeout.
  */
-long       net_recv(net_socket s, void *buf, size_t len);
+std::optional<std::size_t> net_recv(net_socket s, std::span<unsigned char> buf);
+
+/** @brief net_recv() into characters, e.g. the head of an HTTP message. */
+inline std::optional<std::size_t> net_recv(net_socket s, std::span<char> buf){
+  return net_recv(s, std::span<unsigned char>(reinterpret_cast<unsigned char *>(buf.data()), buf.size()));
+}
 
 /**
- * @brief  Sends exactly len bytes.
+ * @brief  Sends all of buf.
  * @param  s   Socket.
  * @param  buf Bytes to send.
- * @param  len Number of bytes.
  * @return True on success, false on error, timeout or closed connection.
  */
-bool       net_send_all(net_socket s, const void *buf, size_t len);
+bool       net_send_all(net_socket s, std::span<const unsigned char> buf);
+
+/** @brief net_send_all() of text, e.g. HTTP headers. */
+inline bool net_send_all(net_socket s, std::string_view text){
+  return net_send_all(s, std::span<const unsigned char>(reinterpret_cast<const unsigned char *>(text.data()), text.size()));
+}
 
 }
 
