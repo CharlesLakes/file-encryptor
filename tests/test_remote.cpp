@@ -85,7 +85,7 @@ int main(void){
   snprintf(url, sizeof(url), "http://127.0.0.1:%d/shared.crls", port);
 
   /* Without the password nothing is visible. */
-  CHECK(!remote_open(&a, url, "wrong-password"));
+  CHECK(!remote_open(a, url, "wrong-password"));
   CHECK(!a.is_open() && a.entries().size() == 0);
   if(strstr(status_text, "libcurl") != NULL){
     printf("SKIP: %s\n", status_text);
@@ -95,7 +95,7 @@ int main(void){
   }
 
   /* With it, the files are listed and extracted byte for byte. */
-  CHECK(remote_open(&a, url, PASSWORD));
+  CHECK(remote_open(a, url, PASSWORD));
   CHECK(a.is_remote() && a.entries().size() == 2);
   check_extract(&a, "out1");
 
@@ -103,35 +103,35 @@ int main(void){
      server grows by exactly that. */
   uint64_t before = size_of(crls);
   path_in(file, "upload-a.bin");
-  CHECK(remote_add_file(&a, file));
+  CHECK(remote_add_file(a, file));
   CHECK(a.entries().size() == 3);
   const archive_entry &added = a.entries()[2];
   CHECK(size_of(crls) == before + added.stored + a.index_length());
 
   /* Two clients: b opened before a's next upload, so b's first attempt
      conflicts and is rebuilt on top of it. */
-  CHECK(remote_open(&b, url, PASSWORD));
+  CHECK(remote_open(b, url, PASSWORD));
   path_in(file, "upload-b.bin");
-  CHECK(remote_add_file(&a, file));
+  CHECK(remote_add_file(a, file));
   path_in(file, "upload-c.bin");
-  CHECK(remote_add_file(&b, file));
+  CHECK(remote_add_file(b, file));
   CHECK(b.entries().size() == 5);
   b.close();
 
   /* A client that does not know the password cannot upload. */
-  CHECK(remote_open(&b, url, PASSWORD));
+  CHECK(remote_open(b, url, PASSWORD));
   memset(b.signing_key().data(), 9, SIGN_SK_BYTES);
   path_in(file, "small.txt");
-  CHECK(!remote_add_file(&b, file));                 /* Duplicate name, rejected locally. */
+  CHECK(!remote_add_file(b, file));                 /* Duplicate name, rejected locally. */
   make_file("upload-d.bin", 5, 36);
   path_in(file, "upload-d.bin");
-  CHECK(!remote_add_file(&b, file));
+  CHECK(!remote_add_file(b, file));
   CHECK(strstr(status_text, "password") != NULL);
   b.close();
 
   /* Everything is there when the archive is opened again, remotely or locally. */
   a.close();
-  CHECK(remote_open(&a, url, PASSWORD));
+  CHECK(remote_open(a, url, PASSWORD));
   CHECK(a.entries().size() == 5);
   check_extract(&a, "out2");
 

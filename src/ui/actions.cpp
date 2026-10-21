@@ -83,7 +83,7 @@ static void open_archive(void){
   set_status(false, remote ? "Downloading the index and deriving the key..." : "Deriving the key...");
   draw();
 
-  if(remote ? !remote_open(&app.arc, path, app.password_field)
+  if(remote ? !remote_open(app.arc, path, app.password_field)
             : !app.arc.open(path, app.password_field)) return;
   clear_secrets();
   unsigned int n = app.arc.entries().size();
@@ -227,7 +227,7 @@ static void pick_confirm(void){
   bool remote = app.arc.is_remote();
   set_status(false, remote ? "Encrypting and uploading %s..." : "Adding %s...", item->name.c_str());
   draw();
-  if(remote ? remote_add_file(&app.arc, path) : app.arc.add_file(path)){
+  if(remote ? remote_add_file(app.arc, path) : app.arc.add_file(path)){
     app.entry_sel = (int) app.arc.entries().size() - 1;
     app.screen = SCREEN_ARCHIVE;
     ensure_visible();

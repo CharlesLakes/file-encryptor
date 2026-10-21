@@ -26,28 +26,30 @@
 #ifndef CORE_REMOTE_H
 #define CORE_REMOTE_H
 
-#include <stdbool.h>
+#include <cstddef>
+#include <string>
+#include <string_view>
 #include "core/archive.h"
 
 namespace crls{
 
-#define REMOTE_BLOCK (1u << 20)   /**< Size of the read cache and of each Range request. */
+inline constexpr std::size_t REMOTE_BLOCK = 1u << 20;   /**< Size of the read cache and of each Range request. */
 
 /**
  * @brief  Checks whether s is an http:// or https:// URL.
  * @param  s String.
  * @return True if it starts with one of those schemes (case-insensitive).
  */
-bool remote_is_url(const char *s);
+bool remote_is_url(std::string_view s);
 
 /**
  * @brief  Opens the archive at a URL.
- * @param  a        Closed archive.
+ * @param  a        Archive (closed first if open).
  * @param  url      http or https URL of a .crls file.
  * @param  password Password used to derive the key.
  * @return True on success, false otherwise (the status explains why).
  */
-bool remote_open(archive *a, const char *url, const char *password);
+[[nodiscard]] bool remote_open(archive &a, const std::string &url, const char *password);
 
 /**
  * @brief  Encrypts a local file and uploads it to the archive, retrying on top
@@ -57,7 +59,7 @@ bool remote_open(archive *a, const char *url, const char *password);
  * @param  path Local file to add.
  * @return True on success, false otherwise (the status explains why).
  */
-bool remote_add_file(archive *a, const char *path);
+[[nodiscard]] bool remote_add_file(archive &a, const std::string &path);
 
 }
 

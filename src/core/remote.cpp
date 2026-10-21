@@ -37,7 +37,7 @@ public:
    * @param  url URL of the archive.
    * @return True on success, false otherwise (the status explains why).
    */
-  [[nodiscard]] bool open(const char *url){
+  [[nodiscard]] bool open(const std::string &url){
     url_ = url;
     if(!block_.allocate(REMOTE_BLOCK)){
       set_status(true, "Not enough memory.");
@@ -84,8 +84,11 @@ private:
   size_t block_len_ = 0;               /**< Number of cached bytes (0 = empty). */
 };
 
-bool remote_is_url(const char *s){
-  return strncasecmp(s, "http://", 7) == 0 || strncasecmp(s, "https://", 8) == 0;
+bool remote_is_url(std::string_view s){
+  auto starts_nocase = [&](std::string_view prefix){
+    return s.size() >= prefix.size() && strncasecmp(s.data(), prefix.data(), prefix.size()) == 0;
+  };
+  return starts_nocase("http://") || starts_nocase("https://");
 }
 
 /**
@@ -178,10 +181,11 @@ bool remote_source::refresh(){
   return true;
 }
 
-bool remote_open(archive *a, const char *url, const char *password){
+bool remote_open(archive &a, const std::string &url, const char *password){
+  a.close();
   std::unique_ptr<remote_source> src = std::make_unique<remote_source>();
   if(!src->open(url)) return false;
-  return a->open_source(std::move(src), url, password);
+  return a.open_source(std::move(src), url, password);
 }
 
 /**
@@ -209,14 +213,14 @@ static bool send_upload(remote_source *c, const append_upload *up, http_response
   return false;
 }
 
-bool remote_add_file(archive *a, const char *path){
-  remote_source *c = a->source() ? a->source()->as_remote() : nullptr;
+bool remote_add_file(archive &a, const std::string &path){
+  remote_source *c = a.source() ? a.source()->as_remote() : nullptr;
   append_upload up;
-  if(!a->is_remote() || !c){
+  if(!a.is_remote() || !c){
     set_status(true, "This archive is not remote.");
     return false;
   }
-  if(!up.prepare(*a, path)) return false;
+  if(!up.prepare(a, path)) return false;
 
   bool ok = false;
   int attempt;
@@ -224,14 +228,14 @@ bool remote_add_file(archive *a, const char *path){
     http_response resp;
     if(!send_upload(c, &up, &resp)) break;
     if(resp.status == 204){
-      up.applied(*a);
+      up.applied(a);
       c->grew(up.claim.base + up.claim.content_length);
       ok = true;
       break;
     }
     if(resp.status == 409){
       /* Someone else uploaded first: build the index again on top of theirs. */
-      if(!c->refresh() || !a->reload() || !up.rebase(*a)) break;
+      if(!c->refresh() || !a.reload() || !up.rebase(a)) break;
       continue;
     }
     switch(resp.status){
