@@ -15,15 +15,15 @@ password-protected archive with the `.crls` extension.
 
 ### Linux
 
-Requirements: `gcc`, `make`, `libX11.so.6` and `libsodium.so.23`. Both libraries
-come with most Linux desktops (on Debian/Ubuntu they are the packages `libx11-6`
-and `libsodium23`).
+Requirements: `gcc`, `cmake` (3.16 or newer), `libX11.so.6` and
+`libsodium.so.23`. Both libraries come with most Linux desktops (on
+Debian/Ubuntu they are the packages `libx11-6` and `libsodium23`).
 
 ```sh
-make          # builds build/file-encryptor
-make run      # builds and starts the GUI
-make test     # core tests (no display needed)
-make clean
+cmake -B build                 # configure (once)
+cmake --build build            # builds build/file-encryptor
+./build/file-encryptor         # starts the GUI
+ctest --test-dir build         # tests (no display needed)
 ```
 
 ### Windows
@@ -31,10 +31,12 @@ make clean
 Install [MSYS2](https://www.msys2.org/), open the **UCRT64** shell and run:
 
 ```sh
-pacman -S --needed make mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libsodium
-make          # builds build/file-encryptor.exe (PLATFORM=win32 is picked automatically)
-make run
-make test
+pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake \
+                   mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-libsodium
+cmake -B build -G Ninja        # the Windows backend is picked automatically
+cmake --build build            # builds build/file-encryptor.exe
+./build/file-encryptor.exe
+ctest --test-dir build
 ```
 
 To run the program outside the MSYS2 shell, copy `libsodium-26.dll` from
@@ -44,7 +46,9 @@ To cross-compile from Linux with MinGW-w64, use the
 [prebuilt libsodium for MinGW](https://download.libsodium.org/libsodium/releases/):
 
 ```sh
-make PLATFORM=win32 CC=x86_64-w64-mingw32-gcc LDFLAGS=-L/path/to/libsodium-win64/lib
+cmake -B build-win -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake \
+      -DCMAKE_LIBRARY_PATH=/path/to/libsodium-win64/lib
+cmake --build build-win
 ```
 
 ## Using it
@@ -65,8 +69,9 @@ folder is skipped.
 ## Repository layout
 
 ```
-Makefile
-compile_flags.txt     compiler flags for clangd (editor/LSP), keep in sync with Makefile
+CMakeLists.txt        build: core library, program and tests
+cmake/
+  mingw-w64.cmake     toolchain file to cross-compile for Windows
 src/
   main.c              entry point: init + event loop
   core/               program logic, no UI code
@@ -93,13 +98,14 @@ src/
     vector.h/.c       generic dynamic array (copied from EDDs-in-C)
 tests/
   test_archive.c      end-to-end test of core/archive.c
+  fixtures/v2.crls    archive written by the version 2 format (compatibility test)
 ```
 
 Dependencies only go downward: `main → ui → core → lib/deps`. Nothing in
 `core/` includes `ui/`, so the core can be tested without a display.
 
-The Makefile variable `PLATFORM` (`x11` or `win32`) picks one `fs_*.c` and one
-`platform_*.c`. No other file contains operating system specific code, except
+CMake picks one `fs_*.c` and one `platform_*.c` from the target system
+(`WIN32` or not). No other file contains operating system specific code, except
 for a few `#ifdef _WIN32` lines in `tests/test_archive.c`.
 
 ## How it works
@@ -163,11 +169,11 @@ bytes.
   All code, comments and UI text are in English.
 - **Secrets:** wipe passwords, keys and plaintext buffers with
   `sodium_memzero()` when you are done with them.
-- **Editor setup:** clangd (LunarVim, VS Code, etc.) reads `compile_flags.txt`
-  to find the `src/` include path. If you change `CFLAGS` in the Makefile,
-  update that file too.
-- **Before committing:** `make && make test` must finish with no warnings, and
-  `make test` must print `All tests passed`. If you change the format, add a
+- **Editor setup:** clangd (LunarVim, VS Code, etc.) reads
+  `build/compile_commands.json`, which CMake writes on every configure, to find
+  the `src/` include path and flags.
+- **Before committing:** `cmake --build build && ctest --test-dir build` must
+  finish with no warnings and no failed tests. If you change the format, add a
   test in `tests/test_archive.c`.
 - **Commit messages:** follow
   [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):

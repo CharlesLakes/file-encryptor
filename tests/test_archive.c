@@ -5,7 +5,7 @@
  *
  * Maintainer: @CharlesLakes
  *
- * No display is required. Runs on Linux and Windows. Run with `make test`.
+ * No display is required. Runs on Linux and Windows. Run with `ctest`.
  *
  * The only argument is the folder holding tests/fixtures/v2.crls, an archive
  * written by the version 2 format code (see tests/fixtures/README.md).
