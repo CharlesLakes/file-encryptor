@@ -9,15 +9,19 @@
 #ifndef TESTS_SERVER_FIXTURE_H
 #define TESTS_SERVER_FIXTURE_H
 
+#include <atomic>
+#include <string>
+#include <thread>
+#include "server/server.h"
+
 /**
  * @brief A server for one folder on 127.0.0.1 and a free port, running in a
- *        background thread from construction to destruction. Only one can
- *        exist at a time.
+ *        background thread from construction to destruction.
  */
 class test_server{
 public:
   /** @brief Starts serving dir; port() is 0 if the server did not start. */
-  explicit test_server(const char *dir);
+  explicit test_server(const std::string &dir);
 
   /** @brief Stops the server and waits for its thread. */
   ~test_server();
@@ -26,7 +30,13 @@ public:
   test_server& operator=(const test_server &) = delete;
 
   /** @brief The port the server listens on, or 0. */
-  int port() const noexcept;
+  int port() const noexcept{ return port_; }
+
+private:
+  crls::server_config cfg_;
+  std::atomic<bool> stop_{false};
+  int port_ = 0;
+  std::thread thread_;
 };
 
 #endif

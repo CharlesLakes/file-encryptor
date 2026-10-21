@@ -11,58 +11,36 @@
  * written by the version 2 format code (see tests/fixtures/README.md).
  */
 
-#include <stdio.h>
-#include <string.h>
+#include <array>
+#include <cstdio>
+#include <string>
+#include <string_view>
 #include "core/archive.h"
+#include "core/fs.h"
 #include "core/util.h"
 #include "test_util.h"
 
 using namespace crls;
 
 /**
- * @brief Extracts every entry into out_name and compares each file with its
- *        original.
- * @param a        Open archive.
- * @param out_name Name of the output folder inside the test folder.
- */
-static void check_extract_all(archive *a, const char *out_name){
-  char out[PATH_MAX];
-  path_in(out, out_name);
-  CHECK_EQ(make_dir(out), 0);
-  for(unsigned int i = 0; i < a->entries().size(); i++){
-    const char *name = a->entries()[i].name.c_str();
-    CHECK(a->extract(i, out) == extract_result::extracted);
-    CHECK(a->extract(i, out) == extract_result::skipped);
-    char original[PATH_MAX], extracted[PATH_MAX];
-    path_in(original, name);
-    snprintf(extracted, sizeof(extracted), "%s", join_path(out, name).c_str());
-    CHECK(same_files(original, extracted));
-  }
-}
-
-/**
  * @brief  Reads the format version byte of an archive file.
  * @param  crls Path of the archive.
  * @return Version, or -1 if the file cannot be read.
  */
-static int header_version(const char *crls){
-  FILE *f = fopen(crls, "rb");
-  if(!f) return -1;
-  fseek(f, 6, SEEK_SET);
-  int version = fgetc(f);
-  fclose(f);
-  return version;
+static int header_version(const std::string &crls){
+  unique_fd fd(open(crls.c_str(), O_RDONLY | O_BINARY));
+  std::array<unsigned char, 1> version;
+  if(!fd || !read_at(fd.get(), version, HEADER_VERSION_POS)) return -1;
+  return version[0];
 }
 
 /**
  * @brief Opens a copy of the version 2 fixture and checks its contents.
  * @param fixtures Folder holding v2.crls.
  */
-static void check_v2_fixture(const char *fixtures){
-  char source[PATH_MAX], crls[PATH_MAX];
-  snprintf(source, sizeof(source), "%s", join_path(fixtures, "v2.crls").c_str());
-  path_in(crls, "v2.crls");
-  CHECK(copy_file(source, crls));
+static void check_v2_fixture(std::string_view fixtures){
+  std::string crls = path_in("v2.crls");
+  CHECK(copy_file(join_path(fixtures, "v2.crls"), crls));
 
   /* Same seeds as the generator of the fixture. */
   make_file("empty.bin", 0, 1);
@@ -72,21 +50,14 @@ static void check_v2_fixture(const char *fixtures){
   archive a;
   CHECK(!a.open(crls, "wrong-password"));
   CHECK(a.open(crls, "fixture-password"));
-  CHECK_EQ(a.entries().size(), 3);
-  if(a.entries().size() == 3){
-    CHECK_EQ(a.entries()[0].name, "empty.bin");
-    CHECK_EQ(a.entries()[1].name, "small.txt");
-    CHECK_EQ(a.entries()[2].name, "chunks.bin");
-  }
   CHECK(a.wasted_space() > 0);                /* The deleted file and the old indexes. */
   CHECK_EQ(a.version(), 2);
-  check_extract_all(&a, "out_v2");
+  constexpr std::array<std::string_view, 3> names = {"empty.bin", "small.txt", "chunks.bin"};
+  check_extract(a, "out_v2", names);
 
   /* A version 2 archive can still be modified, and stays version 2... */
-  char file[PATH_MAX];
   make_file("added.bin", 70000, 5);
-  path_in(file, "added.bin");
-  CHECK(a.add_file(file));
+  CHECK(a.add_file(path_in("added.bin")));
   CHECK_EQ(a.version(), 2);
 
   /* ...until it is compacted, which converts it to version 3. */
@@ -99,7 +70,7 @@ static void check_v2_fixture(const char *fixtures){
   CHECK(!a.open(crls, "wrong-password"));
   CHECK(a.open(crls, "fixture-password"));
   CHECK(a.version() == 3 && a.entries().size() == 4);
-  check_extract_all(&a, "out_v2_compacted");
+  check_extract(a, "out_v2_compacted");
   a.close();
 }
 
@@ -109,27 +80,24 @@ static void check_v2_fixture(const char *fixtures){
  * @param crls     Path of a closed version 3 archive.
  * @param password Its password.
  */
-static void check_header_tampering(const char *crls, const char *password){
-  FILE *f = fopen(crls, "r+b");
-  CHECK(f != NULL);
-  if(!f) return;
+static void check_header_tampering(const std::string &crls, const char *password){
+  unique_fd fd(open(crls.c_str(), O_RDWR | O_BINARY));
+  CHECK(static_cast<bool>(fd));
+  if(!fd) return;
   archive a;
-  for(long i = 0; i < static_cast<long>(V3_AD_BYTES); i++){
-    fseek(f, i, SEEK_SET);
-    int c = fgetc(f);
-    fseek(f, i, SEEK_SET);
-    fputc(c ^ 0xff, f);
-    fflush(f);
+  for(uint64_t i = 0; i < V3_AD_BYTES; i++){
+    std::array<unsigned char, 1> byte;
+    CHECK(read_at(fd.get(), byte, i));
+    byte[0] ^= 0xff;
+    CHECK(write_at(fd.get(), byte, i));
     if(a.open(crls, password)){
-      printf("FAIL: archive opened with header byte %ld changed\n", i);
-      failures++;
+      fail("archive opened with header byte " + std::to_string(i) + " changed");
       a.close();
     }
-    fseek(f, i, SEEK_SET);
-    fputc(c, f);
-    fflush(f);
+    byte[0] ^= 0xff;
+    CHECK(write_at(fd.get(), byte, i));
   }
-  fclose(f);
+  fd.reset();
   CHECK(a.open(crls, password));
   a.close();
 }
@@ -149,22 +117,16 @@ int main(int argc, char **argv){
   make_file("exact.bin", CHUNK, 3);
   make_file("big.bin", 3*CHUNK + 123, 4);
 
-  char crls[PATH_MAX], file[PATH_MAX];
-  path_in(crls, "test.crls");
-
+  std::string crls = path_in("test.crls");
   archive a;
 
   /* Create and add. */
   /* Low Argon2id limits keep the test fast; archive_create() uses "moderate". */
   CHECK(a.create(crls, "password123", 1, 8u << 20));
-  const char *names[] = {"empty.bin", "small.txt", "exact.bin", "big.bin"};
-  for(int i = 0; i < 4; i++){
-    path_in(file, names[i]);
-    CHECK(a.add_file(file));
-  }
-  path_in(file, "small.txt");
-  CHECK(!a.add_file(file));                /* Duplicate name. */
-  CHECK(!a.add_file(crls));                /* Itself. */
+  constexpr std::array<std::string_view, 4> names = {"empty.bin", "small.txt", "exact.bin", "big.bin"};
+  for(std::string_view name : names) CHECK(a.add_file(path_in(name)));
+  CHECK(!a.add_file(path_in("small.txt")));   /* Duplicate name. */
+  CHECK(!a.add_file(crls));                   /* Itself. */
   CHECK_EQ(a.entries().size(), 4);
   CHECK(a.total_size() == 1000 + CHUNK + 3*CHUNK + 123);
   CHECK(a.version() == 3 && a.header_bytes() == V3_HEADER_BYTES);
@@ -175,8 +137,7 @@ int main(int argc, char **argv){
   /* Reopen. */
   CHECK(!a.open(crls, "wrong-password"));
   CHECK(a.open(crls, "password123"));
-  CHECK_EQ(a.entries().size(), 4);
-  check_extract_all(&a, "out1");
+  check_extract(a, "out1", names);
 
   /* Delete leaves unused space; compact reclaims it. */
   CHECK(a.remove(1));
@@ -189,7 +150,7 @@ int main(int argc, char **argv){
 
   CHECK(a.open(crls, "password123"));
   CHECK_EQ(a.entries().size(), 3);
-  check_extract_all(&a, "out2");
+  check_extract(a, "out2");
   a.close();
 
   return test_summary();

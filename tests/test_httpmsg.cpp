@@ -6,10 +6,12 @@
  * Maintainer: @CharlesLakes
  */
 
-#include <cstdio>
-#include <cstring>
+#include <array>
+#include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include "core/httpmsg.h"
 #include "test_util.h"
 
@@ -17,11 +19,11 @@ using namespace crls;
 
 /** @brief One request head and the expected parse result. */
 struct request_case{
-  const char *text;                    /**< Raw request head. */
+  std::string_view text;               /**< Raw request head. */
   http_parse expected;                 /**< Expected result. */
 };
 
-static const request_case requests[] = {
+static constexpr request_case requests[] = {
   {"GET /a.crls HTTP/1.1\r\nHost: x\r\n\r\n", http_parse::ok},
   {"HEAD / HTTP/1.0\r\n\r\n", http_parse::ok},
   {"POST /a.crls HTTP/1.1\r\nContent-Length: 10\r\n\r\n", http_parse::ok},
@@ -44,33 +46,33 @@ static const request_case requests[] = {
   {"POST /a.crls HTTP/1.1\r\ntransfer-encoding: chunked\r\nContent-Length: 5\r\n\r\n", http_parse::unsupported},
 };
 
-/** @brief A request target and the expected decoded path (NULL = rejected). */
+/** @brief A request target and the expected decoded path. */
 struct path_case{
-  const char *target;                  /**< Request target. */
-  const char *expected;                /**< Decoded path, or NULL if rejected. */
+  std::string_view target;                   /**< Request target. */
+  std::optional<std::string_view> expected;  /**< Decoded path, or std::nullopt if rejected. */
 };
 
-static const path_case paths[] = {
+static constexpr path_case paths[] = {
   {"/a.crls", "a.crls"},
   {"/my%20files.crls", "my files.crls"},
   {"/", ""},
   {"/%2e%2e%2fsecret", "../secret"},       /* Decoded once; the server then rejects the name. */
-  {"/a.crls?x=1", NULL},
-  {"/a.crls#top", NULL},
-  {"/a%00.crls", NULL},
-  {"/a%zz.crls", NULL},
-  {"/a%2", NULL},
-  {"a.crls", NULL},
+  {"/a.crls?x=1", std::nullopt},
+  {"/a.crls#top", std::nullopt},
+  {"/a%00.crls", std::nullopt},
+  {"/a%zz.crls", std::nullopt},
+  {"/a%2", std::nullopt},
+  {"a.crls", std::nullopt},
 };
 
 /** @brief A Range header and the expected range for a 1000-byte resource. */
 struct range_case{
-  const char *value;                   /**< Range header value. */
+  std::string_view value;              /**< Range header value. */
   bool valid;                          /**< True if the range is satisfiable. */
   uint64_t first, last;                /**< Expected range when valid. */
 };
 
-static const range_case ranges[] = {
+static constexpr range_case ranges[] = {
   {"bytes=0-99", true, 0, 99},
   {"bytes=900-", true, 900, 999},
   {"bytes=-100", true, 900, 999},
@@ -85,13 +87,12 @@ static const range_case ranges[] = {
 };
 
 int main(){
-  for(size_t i = 0; i < sizeof(requests) / sizeof(requests[0]); i++){
+  for(const request_case &c : requests){
     http_request req;
-    http_parse r = http_parse_request(requests[i].text, req);
-    if(r != requests[i].expected){
-      printf("FAIL request %zu: got %d, expected %d\n", i, static_cast<int>(r), static_cast<int>(requests[i].expected));
-      failures++;
-    }
+    http_parse r = http_parse_request(c.text, req);
+    if(r != c.expected)
+      fail("request \"" + std::string(c.text.substr(0, c.text.find('\r'))) + "\": got " +
+           std::to_string(static_cast<int>(r)) + ", expected " + std::to_string(static_cast<int>(c.expected)));
   }
 
   /* Header lookup, value trimming and the body offset. */
@@ -112,20 +113,16 @@ int main(){
   big += "\r\n";
   CHECK(http_parse_request(big, req) == http_parse::too_large);
 
-  for(size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++){
-    std::optional<std::string> out = http_decode_path(paths[i].target);
-    if(out.has_value() != (paths[i].expected != NULL) || (out && *out != paths[i].expected)){
-      printf("FAIL path %s\n", paths[i].target);
-      failures++;
-    }
+  for(const path_case &c : paths){
+    std::optional<std::string> out = http_decode_path(c.target);
+    if(out.has_value() != c.expected.has_value() || (out && *out != *c.expected))
+      fail("path " + std::string(c.target));
   }
 
-  for(size_t i = 0; i < sizeof(ranges) / sizeof(ranges[0]); i++){
-    std::optional<http_range> r = http_parse_range(ranges[i].value, 1000);
-    if(r.has_value() != ranges[i].valid || (r && (r->first != ranges[i].first || r->last != ranges[i].last))){
-      printf("FAIL range %s\n", ranges[i].value);
-      failures++;
-    }
+  for(const range_case &c : ranges){
+    std::optional<http_range> r = http_parse_range(c.value, 1000);
+    if(r.has_value() != c.valid || (r && (r->first != c.first || r->last != c.last)))
+      fail("range " + std::string(c.value));
   }
 
   std::optional<http_content_range> range = http_parse_content_range("bytes 0-99/1000");
@@ -133,14 +130,14 @@ int main(){
   CHECK(!http_parse_content_range("bytes 0-1000/1000"));
   CHECK(!http_parse_content_range("bytes */1000"));
 
-  const unsigned char bytes[3] = {0x00, 0xab, 0xff};
-  unsigned char back[3];
+  constexpr std::array<unsigned char, 3> bytes = {0x00, 0xab, 0xff};
+  std::array<unsigned char, 3> back{};
   CHECK_EQ(http_hex_encode(bytes), "00abff");
-  CHECK(http_hex_decode("00ABff", back) && memcmp(back, bytes, 3) == 0);
+  CHECK(http_hex_decode("00ABff", back) && back == bytes);
   CHECK(!http_hex_decode("00abf", back));
   CHECK(!http_hex_decode("00abfg", back));
 
-  CHECK(http_parse_u64("18446744073709551615") == UINT64_MAX);
+  CHECK(http_parse_u64("18446744073709551615") == std::numeric_limits<uint64_t>::max());
   CHECK(!http_parse_u64("18446744073709551616"));
   CHECK(!http_parse_u64("") && !http_parse_u64("+1") && !http_parse_u64(" 1"));
 

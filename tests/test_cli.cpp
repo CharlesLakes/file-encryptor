@@ -10,33 +10,32 @@
  * (exit code 77).
  */
 
-#include <stdio.h>
-#include <string.h>
+#include <array>
+#include <cstdio>
+#include <string>
 #include "cli/cli.h"
 #include "core/archive.h"
 #include "core/remote.h"
+#include "core/status.h"
 #include "core/util.h"
 #include "server_fixture.h"
 #include "test_util.h"
 
 using namespace crls;
 
-#define PASSWORD "cli-password"
+inline constexpr char PASSWORD[] = "cli-password";
 inline constexpr int SKIP = 77;   /**< Exit code that CTest reports as skipped. */
 
 /**
  * @brief  Runs cli_upload() with the given password on standard input.
  * @param  password Line given on standard input.
  * @param  args     Arguments, starting at "--upload".
- * @return Exit code of cli_upload().
+ * @return Exit code of cli_upload(), or -1 if standard input cannot be replaced.
  */
-static int run_upload(const char *password, std::span<char *const> args){
-  char input[PATH_MAX];
-  path_in(input, "stdin.txt");
-  FILE *f = fopen(input, "w");
-  fprintf(f, "%s\n", password);
-  fclose(f);
-  if(!freopen(input, "r", stdin)) return -1;
+static int run_upload(std::string_view password, std::span<char *const> args){
+  std::string input = path_in("stdin.txt");
+  if(!write_file(input, std::string(password) + "\n")) return -1;
+  if(!freopen(input.c_str(), "r", stdin)) return -1;
   return cli_upload(args);
 }
 
@@ -45,33 +44,30 @@ int main(){
   temp_dir scratch;
   CHECK(static_cast<bool>(scratch));
 
-  char served[PATH_MAX], crls[PATH_MAX], url[256], one[PATH_MAX], two[PATH_MAX];
-  path_in(served, "served");
-  CHECK_EQ(make_dir(served), 0);
-  snprintf(crls, sizeof(crls), "%s", join_path(served, "cli.crls").c_str());
+  std::string served = path_in("served");
+  CHECK(make_dir(served));
+  std::string crls = join_path(served, "cli.crls");
   make_file("one.bin", 2000, 41);
   make_file("two.bin", 3000, 42);
-  path_in(one, "one.bin");
-  path_in(two, "two.bin");
+  std::string one = path_in("one.bin"), two = path_in("two.bin");
 
   archive a;
   CHECK(a.create(crls, PASSWORD, 1, 8u << 20));
   a.close();
 
   test_server server(served);
-  int port = server.port();
-  CHECK(port > 0);
-  snprintf(url, sizeof(url), "http://127.0.0.1:%d/cli.crls", port);
+  CHECK(server.port() > 0);
+  std::string url = "http://127.0.0.1:" + std::to_string(server.port()) + "/cli.crls";
 
-  /* argv is writable in C and C++, string literals are not. */
-  char upload[] = "--upload";
-  char *usage[] = {upload, url};
+  /* cli_upload() takes argv, whose strings are writable: std::string::data() is. */
+  std::string upload = "--upload";
+  std::array<char *, 2> usage = {upload.data(), url.data()};
   CHECK_EQ(cli_upload(usage), 2);
 
   /* The wrong password opens nothing and uploads nothing. */
-  char *args[] = {upload, url, one, two};
+  std::array<char *, 4> args = {upload.data(), url.data(), one.data(), two.data()};
   int code = run_upload("not-the-password", args);
-  if(strstr(status_message(), "libcurl") != NULL){
+  if(status_mentions("libcurl")){
     printf("SKIP: %s\n", status_message());
     return SKIP;
   }

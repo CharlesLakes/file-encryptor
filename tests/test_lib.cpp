@@ -6,9 +6,10 @@
  * Maintainer: @CharlesLakes
  */
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
+#include <limits>
 #include <new>
 #include <string>
 #include <type_traits>
@@ -44,12 +45,10 @@ static int sum_calls(int n, crls::function_ref<int(int)> f){
 static void check_secret_wipe(){
   alignas(crls::secret<32>) unsigned char storage[sizeof(crls::secret<32>)];
   auto *s = new (storage) crls::secret<32>();
-  std::memset(s->data(), 0xAB, s->size());
+  std::ranges::fill(s->span(), 0xAB);
   CHECK_EQ(s->data()[31], 0xAB);
   s->~basic_secret();
-  bool zero = true;
-  for(unsigned char c : storage) zero = zero && c == 0;
-  CHECK(zero);
+  CHECK(std::ranges::all_of(storage, [](unsigned char c){ return c == 0; }));
 }
 
 int main(){
@@ -58,11 +57,10 @@ int main(){
   CHECK(static_cast<bool>(scratch));
 
   /* unique_fd: ownership, move and release. */
-  char path[PATH_MAX];
-  path_in(path, "file.bin");
+  std::string path = path_in("file.bin");
   make_file("file.bin", 100, 1);
   {
-    crls::unique_fd fd(open(path, O_RDONLY | O_BINARY));
+    crls::unique_fd fd(open(path.c_str(), O_RDONLY | O_BINARY));
     CHECK(static_cast<bool>(fd));
     CHECK_EQ(file_size(fd.get()), 100);
     crls::unique_fd moved(std::move(fd));
@@ -79,7 +77,7 @@ int main(){
   /* secret: zero-initialized, wiped on request and on destruction. */
   crls::secret_text<16> password;
   CHECK(password.data()[0] == '\0' && password.size() == 16);
-  std::strcpy(password.data(), "hunter2");
+  std::ranges::copy(std::string_view("hunter2"), password.data());
   password.wipe();
   CHECK(password.data()[0] == '\0' && password.data()[6] == '\0');
   check_secret_wipe();
@@ -101,7 +99,7 @@ int main(){
   crls::heap_buffer other(std::move(buf));
   CHECK(buf.size() == 0 && buf.data() == nullptr && other.size() == 1000 && other.data()[0] == 7);
   CHECK(other.allocate(0) && other.size() == 0 && other.data() != nullptr);
-  CHECK(!other.allocate(SIZE_MAX / 2) && other.size() == 0);
+  CHECK(!other.allocate(std::numeric_limits<std::size_t>::max() / 2) && other.size() == 0);
   crls::secret_buffer key;
   CHECK(key.allocate(32) && key.span().size() == 32);
   crls::secret_buffer moved;
@@ -123,13 +121,13 @@ int main(){
 
   /* CHECK_EQ reports a mismatch, also between integers of different signedness;
      the expected failure is undone here. */
-  int before = failures;
+  int before = failure_count();
   printf("The next FAIL line is expected:\n");
   CHECK_EQ(-1, static_cast<unsigned>(-1));
   CHECK_EQ(std::string("same"), "same");
   CHECK_EQ(sum_calls(2, square), 5u);
-  bool reported = failures == before + 1;
-  failures = before;
+  bool reported = failure_count() == before + 1;
+  forget_failures(before);
   CHECK(reported);
 
   return test_summary();
