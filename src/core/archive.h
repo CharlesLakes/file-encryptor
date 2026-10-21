@@ -74,6 +74,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <limits.h>
+#include <memory>
 #include <vector>
 #include "core/source.h"
 #include "lib/unique_fd.h"
@@ -124,7 +125,7 @@ typedef struct{
   bool is_open;                                /**< True while an archive is open. */
   bool is_remote;                              /**< True if it was opened from a URL (see remote.h). */
   unique_fd fd;                                /**< Descriptor, held under an exclusive lock (local only). */
-  archive_source src;                          /**< Where every read comes from. */
+  std::unique_ptr<byte_source> src;            /**< Where every read comes from (empty when closed). */
   char path[PATH_MAX];                         /**< Absolute path or URL of the archive. */
   std::vector<archive_entry> entries;          /**< Entries in index order. */
   unsigned char key[KEY_BYTES];                /**< Derived encryption key. */
@@ -174,15 +175,16 @@ void           archive_free(archive *a);
 bool           archive_open(archive *a, const char *path, const char *password);
 
 /**
- * @brief  Opens an archive from a byte source already set in a->src (used for
- *         URLs, see remote.h). The archive is read-only through this module:
- *         files are added with signed uploads instead.
- * @param  a        Archive with its source set.
+ * @brief  Opens an archive from a byte source (used for URLs, see remote.h).
+ *         The archive is read-only through this module: files are added with
+ *         signed uploads instead.
+ * @param  a        Closed archive.
+ * @param  src      Source of the bytes, owned by the archive from now on.
  * @param  name     Name or URL of the archive, kept in a->path.
  * @param  password Password used to derive the key.
  * @return True on success, false otherwise.
  */
-bool           archive_open_source(archive *a, const char *name, const char *password);
+bool           archive_open_source(archive *a, std::unique_ptr<byte_source> src, const char *name, const char *password);
 
 /**
  * @brief  Reads the header and the index again with the keys already derived,

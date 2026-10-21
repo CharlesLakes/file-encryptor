@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <memory>
 #include <string>
 #include <utility>
 #include <unistd.h>
@@ -270,14 +271,13 @@ bool archive_crypto_init(void){
 
 void archive_init(archive *a){
   *a = archive();
-  a->src.fd = -1;
 }
 
 void archive_close(archive *a){
   clear_entries(a);
   sodium_memzero(a->key, sizeof(a->key));
   sodium_memzero(a->sign_sk, sizeof(a->sign_sk));
-  source_close(&a->src);
+  a->src.reset();
   a->fd.reset();
   a->is_open = false;
   a->is_remote = false;
@@ -304,8 +304,8 @@ void archive_free(archive *a){
  */
 static bool load_from_source(archive *a, const char *name, const char *password){
   unsigned char header[MAX_HEADER_BYTES];
-  uint64_t total = a->src.size(&a->src);
-  if(total < V2_HEADER_BYTES || !a->src.read_at(&a->src, header, V2_HEADER_BYTES, 0) ||
+  uint64_t total = a->src->size();
+  if(total < V2_HEADER_BYTES || !a->src->read_at({header, V2_HEADER_BYTES}, 0) ||
      memcmp(header, MAGIC, MAGIC_BYTES) != 0){
     set_status(true, "%s is not a valid .crls file.", name);
     return false;
@@ -315,8 +315,8 @@ static bool load_from_source(archive *a, const char *name, const char *password)
     return false;
   }
   set_layout(a, header[6]);
-  if(total < a->header_bytes || !a->src.read_at(&a->src, header + V2_HEADER_BYTES,
-                                                a->header_bytes - V2_HEADER_BYTES, V2_HEADER_BYTES)){
+  if(total < a->header_bytes ||
+     !a->src->read_at({header + V2_HEADER_BYTES, a->header_bytes - V2_HEADER_BYTES}, V2_HEADER_BYTES)){
     set_status(true, "%s is not a valid .crls file.", name);
     return false;
   }
@@ -332,7 +332,7 @@ static bool load_from_source(archive *a, const char *name, const char *password)
 
   unsigned char *blob = (unsigned char *) malloc(length);
   unsigned char *plain = (unsigned char *) malloc(length);
-  if(!blob || !plain || !a->src.read_at(&a->src, blob, length, offset)){
+  if(!blob || !plain || !a->src->read_at({blob, length}, offset)){
     free(blob);
     free(plain);
     set_status(true, "Could not read the .crls index.");
@@ -390,9 +390,9 @@ bool archive_open(archive *a, const char *path, const char *password){
     return false;
   }
 
-  source_from_fd(&a->src, fd.get());
+  a->src = std::make_unique<fd_source>(fd.get());
   if(!load_from_source(a, path, password)){
-    source_close(&a->src);
+    a->src.reset();
     return false;
   }
 
@@ -402,8 +402,12 @@ bool archive_open(archive *a, const char *path, const char *password){
   return true;
 }
 
-bool archive_open_source(archive *a, const char *name, const char *password){
-  if(!load_from_source(a, name, password)) return false;
+bool archive_open_source(archive *a, std::unique_ptr<byte_source> src, const char *name, const char *password){
+  a->src = std::move(src);
+  if(!load_from_source(a, name, password)){
+    a->src.reset();
+    return false;
+  }
   a->is_open = true;
   a->is_remote = true;
   snprintf(a->path, sizeof(a->path), "%s", name);
@@ -456,7 +460,7 @@ bool archive_create_params(archive *a, const char *path, const char *password, u
   }
 
   a->fd = std::move(fd);
-  source_from_fd(&a->src, a->fd.get());
+  a->src = std::make_unique<fd_source>(a->fd.get());
   a->is_open = true;
   remember_path(a, path);
   return true;
@@ -477,7 +481,7 @@ uint64_t archive_total_size(archive *a){
 uint64_t archive_wasted_space(archive *a){
   uint64_t used = a->header_bytes + a->index_length;
   for(unsigned int i = 0; i < a->entries.size(); i++) used += archive_get_entry(a, i)->stored;
-  uint64_t total = a->src.size(&a->src);
+  uint64_t total = a->src->size();
   return total > used ? total - used : 0;
 }
 
@@ -628,7 +632,7 @@ static pull_result pull_entry(archive *a, const archive_entry *e, const unsigned
       result = PULL_DAMAGED;
       break;
     }
-    if(!a->src.read_at(&a->src, cipher_chunk, n, e->offset + consumed)){
+    if(!a->src->read_at({cipher_chunk, n}, e->offset + consumed)){
       result = PULL_READ_ERROR;
       break;
     }
@@ -752,7 +756,7 @@ bool archive_compact(archive *a){
     }else{
       for(uint64_t copied = 0; ok && copied < e->stored; ){
         size_t len = e->stored - copied < sizeof(cipher_chunk) ? (size_t) (e->stored - copied) : sizeof(cipher_chunk);
-        ok = a->src.read_at(&a->src, cipher_chunk, len, e->offset + copied) &&
+        ok = a->src->read_at({cipher_chunk, len}, e->offset + copied) &&
              write_at(fd.get(), cipher_chunk, len, position + copied);
         copied += len;
       }
@@ -784,12 +788,12 @@ bool archive_compact(archive *a){
       return false;
     }
     /* On Windows the descriptor may have been reopened. */
-    source_from_fd(&a->src, a->fd.get());
+    a->src = std::make_unique<fd_source>(a->fd.get());
     if(!status_error) set_status(true, "Could not compact: %s", strerror(errno));
     return false;
   }
 
-  source_from_fd(&a->src, a->fd.get());
+  a->src = std::make_unique<fd_source>(a->fd.get());
   return true;
 }
 

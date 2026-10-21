@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <memory>
 #include <optional>
 #include <string>
 #include "core/append.h"
@@ -19,20 +20,69 @@
 #include "core/httpmsg.h"
 #include "core/status.h"
 #include "core/util.h"
+#include "lib/heap_buffer.h"
 
 namespace crls{
 
 #define MAX_UPLOAD_ATTEMPTS 5
 
-/** @brief State of a remote archive_source. */
-typedef struct{
-  char url[PATH_MAX];                  /**< URL of the archive. */
-  char etag[128];                      /**< ETag of the archive, sent in If-Match. */
-  uint64_t size;                       /**< Size of the archive. */
-  unsigned char *block;                /**< Cached bytes. */
-  uint64_t block_start;                /**< Offset of the cached bytes. */
-  size_t block_len;                    /**< Number of cached bytes (0 = empty). */
-}remote_ctx;
+/**
+ * @brief byte_source over HTTP Range requests, with a cache of one block.
+ */
+class remote_source final : public byte_source{
+public:
+  /**
+   * @brief  Prepares the cache and fetches the first block of url, learning
+   *         the size and the ETag of the archive.
+   * @param  url URL of the archive.
+   * @return True on success, false otherwise (the status explains why).
+   */
+  [[nodiscard]] bool open(const char *url){
+    url_ = url;
+    if(!block_.allocate(REMOTE_BLOCK)){
+      set_status(true, "Not enough memory.");
+      return false;
+    }
+    return refresh();
+  }
+
+  bool read_at(std::span<unsigned char> buf, uint64_t offset) override;
+  uint64_t size() const override{ return size_; }
+  remote_source* as_remote() noexcept override{ return this; }
+
+  /**
+   * @brief  Fetches the first block again, learning the current size and ETag.
+   *         The cache then holds the current header.
+   * @return True on success, false otherwise.
+   */
+  [[nodiscard]] bool refresh();
+
+  /**
+   * @brief Records that the archive grew to new_size after an upload. The
+   *        cached header pointed to the old index, so the cache is dropped.
+   * @param new_size New size of the archive.
+   */
+  void grew(uint64_t new_size) noexcept{
+    size_ = new_size;
+    block_len_ = 0;
+  }
+
+  /** @brief URL of the archive. */
+  const std::string& url() const noexcept{ return url_; }
+
+  /** @brief ETag of the archive, sent in If-Match (may be empty). */
+  const std::string& etag() const noexcept{ return etag_; }
+
+private:
+  bool fetch_range(unsigned char *buf, uint64_t first, size_t len, bool check_etag, size_t *got);
+
+  std::string url_;                    /**< URL of the archive. */
+  std::string etag_;                   /**< ETag of the archive. */
+  uint64_t size_ = 0;                  /**< Size of the archive. */
+  heap_buffer block_;                  /**< Cached bytes. */
+  uint64_t block_start_ = 0;           /**< Offset of the cached bytes. */
+  size_t block_len_ = 0;               /**< Number of cached bytes (0 = empty). */
+};
 
 /** @brief Destination of a ranged GET. */
 typedef struct{
@@ -62,7 +112,6 @@ bool remote_is_url(const char *s){
  * learned from the response; otherwise If-Match is sent and the total size
  * must not change.
  *
- * @param  c          Remote state.
  * @param  buf        Destination buffer of len bytes.
  * @param  first      First byte.
  * @param  len        Number of bytes; on the first request, the most wanted.
@@ -70,18 +119,16 @@ bool remote_is_url(const char *s){
  * @param  got        Output: number of bytes received.
  * @return True on success, false otherwise (the status explains why).
  */
-static bool fetch_range(remote_ctx *c, unsigned char *buf, uint64_t first, size_t len, bool check_etag, size_t *got){
-  char range[96], if_match[160];
-  snprintf(range, sizeof(range), "Range: bytes=%llu-%llu", (unsigned long long) first,
-           (unsigned long long) (first + len - 1));
-  snprintf(if_match, sizeof(if_match), "If-Match: %s", c->etag);
-  const char *headers[] = {range, check_etag && c->etag[0] ? if_match : NULL, NULL};
+bool remote_source::fetch_range(unsigned char *buf, uint64_t first, size_t len, bool check_etag, size_t *got){
+  std::string range = "Range: bytes=" + std::to_string(first) + "-" + std::to_string(first + len - 1);
+  std::string if_match = "If-Match: " + etag_;
+  const char *headers[] = {range.c_str(), check_etag && !etag_.empty() ? if_match.c_str() : NULL, NULL};
 
   range_sink_ctx sink = {buf, len, 0};
-  http_request_spec req = {"GET", c->url, headers, -1, 0, range_sink, &sink};
+  http_request_spec req = {"GET", url_.c_str(), headers, -1, 0, range_sink, &sink};
   http_response resp;
   if(!http_perform(&req, &resp)){
-    set_status(true, "Could not download %s: %s", c->url, resp.error);
+    set_status(true, "Could not download %s: %s", url_.c_str(), resp.error);
     return false;
   }
   if(resp.status == 412){
@@ -93,95 +140,57 @@ static bool fetch_range(remote_ctx *c, unsigned char *buf, uint64_t first, size_
     return false;
   }
   if(resp.status != 206){
-    set_status(true, "The server answered %d %s for %s.", resp.status, http_reason(resp.status), c->url);
+    set_status(true, "The server answered %d %s for %s.", resp.status, http_reason(resp.status), url_.c_str());
     return false;
   }
 
   std::optional<http_content_range> received = http_parse_content_range(resp.content_range);
   if(!received || received->first != first || received->last - received->first + 1 != sink.received ||
-     (check_etag && received->total != c->size)){
-    set_status(true, "The server sent an unexpected range for %s.", c->url);
+     (check_etag && received->total != size_)){
+    set_status(true, "The server sent an unexpected range for %s.", url_.c_str());
     return false;
   }
   if(!check_etag){
-    c->size = received->total;
-    snprintf(c->etag, sizeof(c->etag), "%s", resp.etag);
+    size_ = received->total;
+    etag_ = resp.etag;
   }
   *got = sink.received;
   return true;
 }
 
-/** @brief archive_source read_at() over HTTP, through the block cache. */
-static bool remote_read_at(archive_source *src, void *buf, size_t len, uint64_t offset){
-  remote_ctx *c = (remote_ctx *) src->ctx;
+bool remote_source::read_at(std::span<unsigned char> buf, uint64_t offset){
+  size_t len = buf.size();
   if(len == 0) return true;
-  if(offset > c->size || len > c->size - offset) return false;
-  if(c->block_len && offset >= c->block_start && offset + len <= c->block_start + c->block_len){
-    memcpy(buf, c->block + (offset - c->block_start), len);
+  if(offset > size_ || len > size_ - offset) return false;
+  if(block_len_ && offset >= block_start_ && offset + len <= block_start_ + block_len_){
+    memcpy(buf.data(), block_.data() + (offset - block_start_), len);
     return true;
   }
 
   size_t got;
-  if(len > REMOTE_BLOCK) return fetch_range(c, (unsigned char *) buf, offset, len, true, &got);
-  size_t want = c->size - offset < REMOTE_BLOCK ? (size_t) (c->size - offset) : REMOTE_BLOCK;
-  c->block_len = 0;
-  if(!fetch_range(c, c->block, offset, want, true, &got)) return false;
-  c->block_start = offset;
-  c->block_len = got;
-  memcpy(buf, c->block, len);
+  if(len > REMOTE_BLOCK) return fetch_range(buf.data(), offset, len, true, &got);
+  size_t want = size_ - offset < REMOTE_BLOCK ? (size_t) (size_ - offset) : REMOTE_BLOCK;
+  block_len_ = 0;
+  if(!fetch_range(block_.data(), offset, want, true, &got)) return false;
+  block_start_ = offset;
+  block_len_ = got;
+  memcpy(buf.data(), block_.data(), len);
   return true;
 }
 
-/** @brief archive_source size() of a remote archive. */
-static uint64_t remote_size(archive_source *src){
-  return ((remote_ctx *) src->ctx)->size;
-}
-
-/** @brief archive_source close() of a remote archive. */
-static void remote_close(archive_source *src){
-  remote_ctx *c = (remote_ctx *) src->ctx;
-  if(!c) return;
-  free(c->block);
-  free(c);
-}
-
-/**
- * @brief  Fetches the first block of the archive again, learning its current
- *         size and ETag. The cache then holds the current header.
- * @param  c Remote state.
- * @return True on success, false otherwise.
- */
-static bool refresh(remote_ctx *c){
+bool remote_source::refresh(){
   size_t got;
-  c->block_len = 0;
-  if(!fetch_range(c, c->block, 0, REMOTE_BLOCK, false, &got)) return false;
-  c->block_start = 0;
-  c->block_len = got;
+  block_len_ = 0;
+  if(!fetch_range(block_.data(), 0, REMOTE_BLOCK, false, &got)) return false;
+  block_start_ = 0;
+  block_len_ = got;
   return true;
 }
 
 bool remote_open(archive *a, const char *url, const char *password){
-  remote_ctx *c = (remote_ctx *) calloc(1, sizeof(remote_ctx));
-  if(c) c->block = (unsigned char *) malloc(REMOTE_BLOCK);
-  if(!c || !c->block || strlen(url) >= sizeof(c->url)){
-    if(c) free(c->block);
-    free(c);
-    set_status(true, c ? "The URL is too long." : "Not enough memory.");
-    return false;
-  }
-  snprintf(c->url, sizeof(c->url), "%s", url);
-
-  memset(&a->src, 0, sizeof(a->src));
-  a->src.read_at = remote_read_at;
-  a->src.size = remote_size;
-  a->src.close = remote_close;
-  a->src.fd = -1;
-  a->src.ctx = c;
-  if(!refresh(c) || !archive_open_source(a, url, password)){
-    source_close(&a->src);
-    return false;
-  }
-  return true;
+  std::unique_ptr<remote_source> src = std::make_unique<remote_source>();
+  if(!src->open(url)) return false;
+  return archive_open_source(a, std::move(src), url, password);
 }
 
 /**
@@ -191,24 +200,24 @@ bool remote_open(archive *a, const char *url, const char *password){
  * @param  resp Output: the response.
  * @return True if a response was received.
  */
-static bool send_upload(remote_ctx *c, const append_upload *up, http_response *resp){
+static bool send_upload(remote_source *c, const append_upload *up, http_response *resp){
   std::string base = "X-Crls-Base: " + std::to_string(up->claim.base);
   std::string index_length = "X-Crls-Index-Length: " + std::to_string(up->claim.index_length);
   std::string nonce = "X-Crls-Index-Nonce: " + http_hex_encode(up->claim.index_nonce);
   std::string hash = "X-Crls-Body-Hash: " + http_hex_encode(up->claim.body_hash);
   std::string sig = "X-Crls-Sig: " + http_hex_encode(up->claim.signature);
-  std::string if_match = std::string("If-Match: ") + c->etag;
+  std::string if_match = "If-Match: " + c->etag();
   const char *headers[] = {"Content-Type: application/octet-stream", base.c_str(), index_length.c_str(),
-                           nonce.c_str(), hash.c_str(), sig.c_str(), c->etag[0] ? if_match.c_str() : NULL, NULL};
+                           nonce.c_str(), hash.c_str(), sig.c_str(), c->etag().empty() ? NULL : if_match.c_str(), NULL};
 
-  http_request_spec req = {"POST", c->url, headers, up->body_fd.get(), up->claim.content_length, NULL, NULL};
+  http_request_spec req = {"POST", c->url().c_str(), headers, up->body_fd.get(), up->claim.content_length, NULL, NULL};
   if(http_perform(&req, resp)) return true;
-  set_status(true, "Could not upload to %s: %s", c->url, resp->error);
+  set_status(true, "Could not upload to %s: %s", c->url().c_str(), resp->error);
   return false;
 }
 
 bool remote_add_file(archive *a, const char *path){
-  remote_ctx *c = (remote_ctx *) a->src.ctx;
+  remote_source *c = a->src ? a->src->as_remote() : nullptr;
   append_upload up;
   if(!a->is_remote || !c){
     set_status(true, "This archive is not remote.");
@@ -223,15 +232,13 @@ bool remote_add_file(archive *a, const char *path){
     if(!send_upload(c, &up, &resp)) break;
     if(resp.status == 204){
       append_applied(a, &up);
-      c->size = up.claim.base + up.claim.content_length;
-      /* The cached header points to the old index. */
-      c->block_len = 0;
+      c->grew(up.claim.base + up.claim.content_length);
       ok = true;
       break;
     }
     if(resp.status == 409){
       /* Someone else uploaded first: build the index again on top of theirs. */
-      if(!refresh(c) || !archive_reload(a) || !append_rebase(a, &up)) break;
+      if(!c->refresh() || !archive_reload(a) || !append_rebase(a, &up)) break;
       continue;
     }
     switch(resp.status){
