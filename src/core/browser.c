@@ -15,6 +15,7 @@
 #include <strings.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include "core/fs.h"
 #include "core/status.h"
 #include "core/util.h"
 
@@ -58,7 +59,7 @@ void browser_load(browser *b){
     return;
   }
 
-  if(strcmp(b->dir, "/") != 0){
+  if(!fs_is_root(b->dir)){
     dir_item up = {"..", true};
     push_back_vector(&b->items, (void *) &up);
   }
@@ -90,7 +91,7 @@ void browser_load(browser *b){
 void browser_enter(browser *b, const char *name){
   char candidate[PATH_MAX], resolved[PATH_MAX];
   join_path(candidate, sizeof(candidate), b->dir, name);
-  if(!realpath(candidate, resolved)){
+  if(!fs_absolute_path(candidate, resolved)){
     set_status(true, "Could not enter %s: %s", candidate, strerror(errno));
     return;
   }

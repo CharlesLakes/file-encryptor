@@ -14,8 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/file.h>
 #include <sys/stat.h>
+#include "core/fs.h"
 #include "core/status.h"
 #include "core/util.h"
 #include "deps/sodium.h"
@@ -62,22 +62,13 @@ static bool derive_key(archive *a, const char *password, const unsigned char *sa
 }
 
 /**
- * @brief  Acquires a non-blocking exclusive lock on the file.
- * @param  fd File descriptor.
- * @return True if the lock was acquired, false otherwise.
- */
-static bool lock_file(int fd){
-  return flock(fd, LOCK_EX | LOCK_NB) == 0;
-}
-
-/**
  * @brief Stores the absolute path of the archive, or path as given if it
  *        cannot be resolved.
  * @param a    Archive.
  * @param path Path of the archive.
  */
 static void remember_path(archive *a, const char *path){
-  if(!realpath(path, a->path)) snprintf(a->path, sizeof(a->path), "%s", path);
+  if(!fs_absolute_path(path, a->path)) snprintf(a->path, sizeof(a->path), "%s", path);
 }
 
 /**
@@ -90,15 +81,6 @@ static int find_entry(archive *a, const char *name){
   for(unsigned int i = 0; i < a->entries.n; i++)
     if(strcmp(archive_get_entry(a, i)->name, name) == 0) return (int) i;
   return -1;
-}
-
-/**
- * @brief  Checks that a stored name cannot escape the extraction folder.
- * @param  name File name.
- * @return True if the name is safe, false otherwise.
- */
-static bool safe_name(const char *name){
-  return name[0] != '\0' && strchr(name, '/') == NULL && strcmp(name, ".") != 0 && strcmp(name, "..") != 0;
 }
 
 /* ---------------- Index ---------------- */
@@ -158,13 +140,13 @@ static bool write_index_to(archive *a, int fd){
   put_le(pointer, end, 8);
   put_le(pointer + 8, blob_size, 8);
 
-  bool ok = write_at(fd, blob, blob_size, end) && fsync(fd) == 0 &&
-            write_at(fd, pointer, sizeof(pointer), HEADER_AD_BYTES) && fsync(fd) == 0;
+  bool ok = write_at(fd, blob, blob_size, end) && fs_sync(fd) &&
+            write_at(fd, pointer, sizeof(pointer), HEADER_AD_BYTES) && fs_sync(fd);
   free(blob);
 
   if(!ok){
     set_status(true, "Could not write the index: %s", strerror(errno));
-    if(ftruncate(fd, (off_t) end) != 0){}
+    fs_truncate(fd, end);
     return false;
   }
   a->index_offset = end;
@@ -245,12 +227,12 @@ void archive_free(archive *a){
 }
 
 bool archive_open(archive *a, const char *path, const char *password){
-  int fd = open(path, O_RDWR);
+  int fd = open(path, O_RDWR | O_BINARY);
   if(fd < 0){
     set_status(true, "Could not open %s: %s", path, strerror(errno));
     return false;
   }
-  if(!lock_file(fd)){
+  if(!fs_lock(fd)){
     close(fd);
     set_status(true, "%s is already open in another program.", path);
     return false;
@@ -330,12 +312,12 @@ bool archive_open(archive *a, const char *path, const char *password){
 
 bool archive_create(archive *a, const char *path, const char *password){
   status_error = false;
-  int fd = open(path, O_RDWR | O_CREAT | O_EXCL, 0600);
+  int fd = open(path, O_RDWR | O_CREAT | O_EXCL | O_BINARY, 0600);
   if(fd < 0){
     set_status(true, "Could not create %s: %s", path, strerror(errno));
     return false;
   }
-  lock_file(fd);
+  fs_lock(fd);
 
   uint64_t ops = crypto_pwhash_opslimit_moderate(), mem = crypto_pwhash_memlimit_moderate();
   unsigned char header[HEADER_BYTES] = {0};
@@ -396,8 +378,7 @@ bool has_crls_ext(const char *name){
 /* ---------------- Modifications ---------------- */
 
 bool archive_add_file(archive *a, const char *path){
-  const char *name = strrchr(path, '/');
-  name = name ? name + 1 : path;
+  const char *name = fs_basename(path);
   if(strlen(name) == 0 || strlen(name) > MAX_NAME){
     set_status(true, "Invalid file name.");
     return false;
@@ -414,8 +395,7 @@ bool archive_add_file(archive *a, const char *path){
     set_status(true, "Could not read %s.", path);
     return false;
   }
-  struct stat self;
-  if(fstat(a->fd, &self) == 0 && self.st_dev == info.st_dev && self.st_ino == info.st_ino){
+  if(fs_same_file(a->fd, fileno(source))){
     fclose(source);
     set_status(true, "A .crls cannot be added to itself.");
     return false;
@@ -452,7 +432,7 @@ bool archive_add_file(archive *a, const char *path){
   e.stored = position - e.offset;
 
   if(!ok){
-    if(ftruncate(a->fd, (off_t) e.offset) != 0){}
+    fs_truncate(a->fd, e.offset);
     set_status(true, "Could not add %s: %s", name, strerror(errno));
     return false;
   }
@@ -460,7 +440,7 @@ bool archive_add_file(archive *a, const char *path){
   push_back_vector(&a->entries, (void *) &e);
   if(!write_index_to(a, a->fd)){
     a->entries.n--;
-    if(ftruncate(a->fd, (off_t) e.offset) != 0){}
+    fs_truncate(a->fd, e.offset);
     return false;
   }
 
@@ -494,7 +474,7 @@ bool archive_compact(archive *a){
   status_error = false;
   char tmp_path[PATH_MAX + 8];
   snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", a->path);
-  int fd = open(tmp_path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+  int fd = open(tmp_path, O_RDWR | O_CREAT | O_TRUNC | O_BINARY, 0600);
   if(fd < 0){
     set_status(true, "Could not create %s: %s", tmp_path, strerror(errno));
     return false;
@@ -521,23 +501,25 @@ bool archive_compact(archive *a){
   }
 
   uint64_t old_index_offset = a->index_offset, old_index_length = a->index_length;
-  ok = ok && write_index_to(a, fd) && rename(tmp_path, a->path) == 0;
+  ok = ok && write_index_to(a, fd) && fs_replace_file(tmp_path, &fd, a->path, &a->fd);
 
   if(!ok){
     for(unsigned int i = 0; old_offsets && i < a->entries.n; i++) archive_get_entry(a, i)->offset = old_offsets[i];
     a->index_offset = old_index_offset;
     a->index_length = old_index_length;
     free(old_offsets);
-    close(fd);
+    if(fd >= 0) close(fd);
     unlink(tmp_path);
-    if(!status_error) set_status(true, "Could not compact: %s", strerror(errno));
+    if(a->fd < 0){
+      archive_close(a);
+      set_status(true, "Could not reopen the archive after compacting.");
+    }else if(!status_error){
+      set_status(true, "Could not compact: %s", strerror(errno));
+    }
     return false;
   }
 
   free(old_offsets);
-  close(a->fd);
-  a->fd = fd;
-  lock_file(fd);
   return true;
 }
 
@@ -545,14 +527,14 @@ bool archive_compact(archive *a){
 
 int archive_extract_entry(archive *a, unsigned int index, const char *dir){
   archive_entry *e = archive_get_entry(a, index);
-  if(!safe_name(e->name)){
+  if(!fs_is_plain_name(e->name)){
     set_status(true, "Name not allowed in the .crls: %s", e->name);
     return -1;
   }
 
   char path[PATH_MAX];
   join_path(path, sizeof(path), dir, e->name);
-  int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+  int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_BINARY, 0600);
   if(fd < 0){
     if(errno == EEXIST) return 0;
     set_status(true, "Could not create %s: %s", path, strerror(errno));

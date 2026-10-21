@@ -5,7 +5,7 @@
  *
  * Maintainer: @CharlesLakes
  *
- * No X11 display is required. Run with `make test`.
+ * No display is required. Runs on Linux and Windows. Run with `make test`.
  */
 
 #include <stdio.h>
@@ -17,13 +17,36 @@
 #include "core/status.h"
 #include "core/util.h"
 
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#define make_dir(path) _mkdir(path)
+#else
+#define make_dir(path) mkdir(path, 0700)
+#endif
+
 static int failures = 0;
 
 #define CHECK(cond) do{ \
     if(!(cond)){ printf("FAIL %s:%d: %s (status: %s)\n", __FILE__, __LINE__, #cond, status_text); failures++; } \
   }while(0)
 
-static char dir[] = "/tmp/file-encrypter-test-XXXXXX";
+static char dir[PATH_MAX];
+
+/**
+ * @brief  Creates a new, uniquely named folder for the test files.
+ * @return True on success, false otherwise.
+ */
+static bool make_temp_dir(void){
+#ifdef _WIN32
+  const char *base = getenv("TEMP");
+  snprintf(dir, sizeof(dir), "%s\\file-encrypter-test-XXXXXX", base ? base : ".");
+  return _mktemp(dir) != NULL && make_dir(dir) == 0;
+#else
+  snprintf(dir, sizeof(dir), "/tmp/file-encrypter-test-XXXXXX");
+  return mkdtemp(dir) != NULL;
+#endif
+}
 
 /**
  * @brief Builds the path of name inside the test folder.
@@ -77,7 +100,7 @@ static bool same_files(const char *a, const char *b){
 static void check_extract_all(archive *a, const char *out_name){
   char out[PATH_MAX];
   path_in(out, out_name);
-  CHECK(mkdir(out, 0700) == 0);
+  CHECK(make_dir(out) == 0);
   for(unsigned int i = 0; i < a->entries.n; i++){
     const char *name = archive_get_entry(a, i)->name;
     CHECK(archive_extract_entry(a, i, out) == 1);
@@ -91,7 +114,7 @@ static void check_extract_all(archive *a, const char *out_name){
 
 int main(void){
   CHECK(archive_crypto_init());
-  CHECK(mkdtemp(dir) != NULL);
+  CHECK(make_temp_dir());
 
   make_file("empty.bin", 0, 1);
   make_file("small.txt", 1000, 2);
@@ -139,7 +162,11 @@ int main(void){
   archive_free(&a);
 
   char cmd[PATH_MAX + 16];
+#ifdef _WIN32
+  snprintf(cmd, sizeof(cmd), "rmdir /s /q \"%s\"", dir);
+#else
   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
+#endif
   if(system(cmd) != 0) printf("could not remove %s\n", dir);
 
   if(failures) printf("%d check(s) failed\n", failures);

@@ -180,6 +180,7 @@ static void compact(void){
   char wasted_text[32];
   format_size(wasted, wasted_text, sizeof(wasted_text));
   if(archive_compact(&app.archive)) set_status(false, "Compacted: reclaimed %s.", wasted_text);
+  else if(!app.archive.is_open) app.screen = SCREEN_OPEN;
 }
 
 /**

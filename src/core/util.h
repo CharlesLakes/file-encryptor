@@ -1,6 +1,7 @@
 /**
  * @file    util.h
- * @brief   General-purpose helpers, independent of the .crls format and the UI.
+ * @brief   General-purpose helpers, independent of the .crls format, the UI and
+ *          the operating system (see fs.h for the latter).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
@@ -38,34 +39,8 @@ uint64_t get_le(const unsigned char *p, int bytes);
 void     format_size(uint64_t size, char *out, size_t out_size);
 
 /**
- * @brief  Reads exactly len bytes at offset.
- * @param  fd     File descriptor.
- * @param  buf    Destination buffer.
- * @param  len    Number of bytes to read.
- * @param  offset Position in the file.
- * @return True on success, false on any error or premature end of file.
- */
-bool     read_at(int fd, void *buf, size_t len, uint64_t offset);
-
-/**
- * @brief  Writes exactly len bytes at offset.
- * @param  fd     File descriptor.
- * @param  buf    Source buffer.
- * @param  len    Number of bytes to write.
- * @param  offset Position in the file.
- * @return True on success, false on any error.
- */
-bool     write_at(int fd, const void *buf, size_t len, uint64_t offset);
-
-/**
- * @brief  Returns the size of an open file.
- * @param  fd File descriptor.
- * @return Size in bytes, or 0 if it cannot be determined.
- */
-uint64_t file_size(int fd);
-
-/**
- * @brief Builds dir + "/" + name, without duplicating the slash when dir is "/".
+ * @brief Builds dir + "/" + name, without duplicating the separator when dir
+ *        already ends with one (e.g. "/" or "C:\\").
  * @param out      Destination buffer.
  * @param out_size Capacity of out.
  * @param dir      Directory path.

@@ -1,6 +1,6 @@
 /**
  * @file    ui.h
- * @brief   Graphical user interface (Xlib): shared state, constants and functions.
+ * @brief   Graphical user interface: shared state, constants and functions.
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
@@ -18,18 +18,19 @@
  *
  * @section ui_flow Event Flow
  *
- * main.c receives each event, input.c translates it into an action, actions.c
- * executes it (delegating to core/archive.c) and draw.c repaints the window.
+ * main.c receives each event from the platform layer (platform.h), input.c
+ * translates it into an action, actions.c executes it (delegating to
+ * core/archive.c) and draw.c repaints the window.
  *
  * @section ui_files Source Files
  *
  * | File      | Responsibility                                          |
  * |-----------|---------------------------------------------------------|
- * | window.c  | Creation and destruction of the window and fonts (gui)  |
  * | layout.c  | Application state (app), list geometry and buttons      |
  * | draw.c    | Painting of each screen                                 |
  * | actions.c | Behavior of each button and key                         |
  * | input.c   | Mouse and keyboard handling                             |
+ * | platform_*.c | Window, events and drawing for each windowing system |
  */
 
 #ifndef UI_UI_H
@@ -39,7 +40,7 @@
 #include <limits.h>
 #include "core/archive.h"
 #include "core/browser.h"
-#include "deps/xlib.h"
+#include "ui/platform.h"
 
 /* ---------------- Geometry (pixels) ---------------- */
 
@@ -114,37 +115,11 @@ typedef struct{
   char confirm_field[MAX_PASSWORD + 1];  /**< Content of the confirmation field. */
   int focus;                     /**< FIELD_* value with keyboard focus. */
 
-  Time last_click_time;          /**< Time of the last click, for double-click detection. */
+  unsigned long last_click_time; /**< Time of the last click, for double-click detection. */
   int last_click_index;          /**< Row of the last click, for double-click detection. */
 }app_state;
 
-/**
- * @brief X11 resources of the window.
- */
-typedef struct{
-  Display *dpy;                  /**< Connection to the X server. */
-  Window win;                    /**< Main window. */
-  Atom wm_delete;                /**< WM_DELETE_WINDOW protocol atom. */
-  Pixmap buffer;                 /**< Off-screen buffer, copied to win after each repaint. */
-  GC gc;                         /**< Graphics context. */
-  XFontStruct *font, *bold_font, *title_font; /**< Regular, bold and title fonts. */
-}gui_state;
-
 extern app_state app;            /**< Global application state (layout.c). */
-extern gui_state gui;            /**< Global X11 resources (window.c). */
-
-/* ---------------- window.c ---------------- */
-
-/**
- * @brief  Connects to the X server, loads the fonts and maps the window.
- * @return True on success, false otherwise.
- */
-bool ui_open_window(void);
-
-/**
- * @brief Releases all X11 resources and closes the display connection.
- */
-void ui_close_window(void);
 
 /* ---------------- layout.c ---------------- */
 
@@ -259,15 +234,15 @@ void clear_secrets(void);
 /* ---------------- input.c ---------------- */
 
 /**
- * @brief Handles a mouse button press.
- * @param event X11 button event.
+ * @brief Handles a mouse click or wheel event.
+ * @param event EVENT_CLICK or EVENT_WHEEL event.
  */
-void handle_click(XButtonEvent *event);
+void handle_click(const ui_event *event);
 
 /**
  * @brief Handles a key press.
- * @param event X11 key event.
+ * @param event EVENT_KEY event.
  */
-void handle_key(XKeyEvent *event);
+void handle_key(const ui_event *event);
 
 #endif

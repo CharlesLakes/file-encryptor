@@ -1,0 +1,173 @@
+/**
+ * @file    fs_win32.c
+ * @brief   Windows implementation of the file system abstraction (see fs.h).
+ * @author  @CharlesLakes
+ *
+ * Maintainer: @CharlesLakes
+ *
+ * @section fs_win32_notes Notes
+ *
+ * - Positioned reads and writes use ReadFile()/WriteFile() with an OVERLAPPED
+ *   offset on the handle behind each C runtime descriptor.
+ * - Locks are mandatory on Windows: other processes cannot read or write the
+ *   archive while it is open, but the descriptor holding the lock can.
+ * - An open file cannot be renamed or replaced, so fs_replace_file() closes
+ *   both descriptors, moves the file and reopens it.
+ */
+
+#include "core/fs.h"
+
+#include <errno.h>
+#include <io.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
+#include <windows.h>
+
+/** @brief Largest transfer passed to a single ReadFile() or WriteFile() call. */
+#define MAX_TRANSFER (1u << 30)
+
+/**
+ * @brief  Returns the Windows handle behind a C runtime descriptor.
+ * @param  fd File descriptor.
+ * @return Handle, or INVALID_HANDLE_VALUE.
+ */
+static HANDLE handle_of(int fd){
+  return (HANDLE) _get_osfhandle(fd);
+}
+
+/**
+ * @brief  Builds an OVERLAPPED structure pointing at offset.
+ * @param  offset Position in the file.
+ * @return Initialized structure.
+ */
+static OVERLAPPED at_offset(uint64_t offset){
+  OVERLAPPED ov;
+  memset(&ov, 0, sizeof(ov));
+  ov.Offset = (DWORD) offset;
+  ov.OffsetHigh = (DWORD) (offset >> 32);
+  return ov;
+}
+
+bool read_at(int fd, void *buf, size_t len, uint64_t offset){
+  HANDLE h = handle_of(fd);
+  unsigned char *p = (unsigned char *) buf;
+  while(len > 0){
+    DWORD want = len < MAX_TRANSFER ? (DWORD) len : MAX_TRANSFER, got = 0;
+    OVERLAPPED ov = at_offset(offset);
+    if(!ReadFile(h, p, want, &got, &ov) || got == 0) return false;
+    p += got;
+    len -= got;
+    offset += got;
+  }
+  return true;
+}
+
+bool write_at(int fd, const void *buf, size_t len, uint64_t offset){
+  HANDLE h = handle_of(fd);
+  const unsigned char *p = (const unsigned char *) buf;
+  while(len > 0){
+    DWORD want = len < MAX_TRANSFER ? (DWORD) len : MAX_TRANSFER, put = 0;
+    OVERLAPPED ov = at_offset(offset);
+    if(!WriteFile(h, p, want, &put, &ov) || put == 0){
+      errno = EIO;
+      return false;
+    }
+    p += put;
+    len -= put;
+    offset += put;
+  }
+  return true;
+}
+
+uint64_t file_size(int fd){
+  LARGE_INTEGER size;
+  return GetFileSizeEx(handle_of(fd), &size) ? (uint64_t) size.QuadPart : 0;
+}
+
+bool fs_lock(int fd){
+  OVERLAPPED ov = at_offset(0);
+  return LockFileEx(handle_of(fd), LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0,
+                    MAXDWORD, MAXDWORD, &ov) != 0;
+}
+
+bool fs_sync(int fd){
+  return FlushFileBuffers(handle_of(fd)) != 0;
+}
+
+bool fs_truncate(int fd, uint64_t size){
+  return _chsize_s(fd, (long long) size) == 0;
+}
+
+bool fs_same_file(int fd_a, int fd_b){
+  BY_HANDLE_FILE_INFORMATION a, b;
+  return GetFileInformationByHandle(handle_of(fd_a), &a) && GetFileInformationByHandle(handle_of(fd_b), &b) &&
+         a.dwVolumeSerialNumber == b.dwVolumeSerialNumber &&
+         a.nFileIndexHigh == b.nFileIndexHigh && a.nFileIndexLow == b.nFileIndexLow;
+}
+
+bool fs_absolute_path(const char *path, char *out){
+  if(!_fullpath(out, path, PATH_MAX) || GetFileAttributesA(out) == INVALID_FILE_ATTRIBUTES){
+    errno = ENOENT;
+    return false;
+  }
+  /* Drop trailing separators, except the one of a drive root such as "C:\". */
+  size_t len = strlen(out);
+  while(len > 1 && fs_is_separator(out[len - 1]) && !fs_is_root(out)) out[--len] = '\0';
+  return true;
+}
+
+/**
+ * @brief  Opens a file for reading and writing, optionally locking it.
+ * @param  path Path of the file.
+ * @param  lock True to acquire the exclusive lock.
+ * @return File descriptor, or -1 on error.
+ */
+static int reopen(const char *path, bool lock){
+  int fd = open(path, O_RDWR | O_BINARY);
+  if(fd >= 0 && lock) fs_lock(fd);
+  return fd;
+}
+
+bool fs_replace_file(const char *from, int *from_fd, const char *to, int *to_fd){
+  close(*from_fd);
+  close(*to_fd);
+  bool moved = MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+
+  if(!moved){
+    errno = EACCES;
+    *to_fd = reopen(to, true);
+    *from_fd = reopen(from, false);
+    return false;
+  }
+  *from_fd = -1;
+  *to_fd = reopen(to, true);
+  return *to_fd >= 0;
+}
+
+bool fs_is_separator(char c){
+  return c == '/' || c == '\\';
+}
+
+bool fs_is_root(const char *path){
+  size_t len = strlen(path);
+  if(len == 1) return fs_is_separator(path[0]);
+  return len == 3 && path[1] == ':' && fs_is_separator(path[2]);
+}
+
+const char* fs_basename(const char *path){
+  const char *name = path;
+  for(const char *p = path; *p; p++)
+    if(fs_is_separator(*p) || *p == ':') name = p + 1;
+  return name;
+}
+
+bool fs_is_plain_name(const char *name){
+  size_t len = strlen(name);
+  if(len == 0 || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return false;
+  /* Windows silently strips trailing dots and spaces, so "..." would mean "..". */
+  if(name[len - 1] == '.' || name[len - 1] == ' ') return false;
+  for(const char *p = name; *p; p++)
+    if((unsigned char) *p < 32 || strchr("/\\:*?\"<>|", *p)) return false;
+  return true;
+}

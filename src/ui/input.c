@@ -9,6 +9,7 @@
 #include "ui/ui.h"
 
 #include <string.h>
+#include "core/fs.h"
 
 #define DOUBLE_CLICK_MS 400   /**< Maximum interval between the clicks of a double click. */
 
@@ -26,20 +27,18 @@ static bool inside(int px, int py, int x, int y, int w, int h){
   return px >= x && px < x + w && py >= y && py < y + h;
 }
 
-void handle_click(XButtonEvent *event){
+void handle_click(const ui_event *event){
   int px = event->x, py = event->y;
   int lx, ly, lw, lh;
   list_rect(&lx, &ly, &lw, &lh);
 
-  /* Buttons 4 and 5 correspond to the mouse wheel. */
-  if(event->button == 4 || event->button == 5){
+  if(event->type == EVENT_WHEEL){
     if(inside(px, py, lx, ly, lw, lh)){
-      *list_scroll() += event->button == 4 ? -3 : 3;
+      *list_scroll() += 3 * event->wheel;
       clamp_scroll();
     }
     return;
   }
-  if(event->button != 1) return;
 
   button b[MAX_BUTTONS];
   int count = get_buttons(b);
@@ -93,39 +92,37 @@ static void edit_field(char c, bool erase){
   }
 }
 
-void handle_key(XKeyEvent *event){
-  char text[8];
-  KeySym sym;
-  int n = XLookupString(event, text, sizeof(text), &sym, NULL);
+void handle_key(const ui_event *event){
+  int key = event->key;
 
-  switch(sym){
-    case XK_Up:        move_selection(-1); return;
-    case XK_Down:      move_selection(1); return;
-    case XK_Page_Up:   move_selection(-visible_rows()); return;
-    case XK_Page_Down: move_selection(visible_rows()); return;
-    case XK_Home:      move_selection(-list_count()); return;
-    case XK_End:       move_selection(list_count()); return;
+  switch(key){
+    case KEY_UP:        move_selection(-1); return;
+    case KEY_DOWN:      move_selection(1); return;
+    case KEY_PAGE_UP:   move_selection(-visible_rows()); return;
+    case KEY_PAGE_DOWN: move_selection(visible_rows()); return;
+    case KEY_HOME:      move_selection(-list_count()); return;
+    case KEY_END:       move_selection(list_count()); return;
   }
 
   if(app.screen == SCREEN_OPEN){
-    if(sym == XK_Tab){ app.focus = (app.focus + 1) % FIELD_COUNT; return; }
-    if(sym == XK_ISO_Left_Tab){ app.focus = (app.focus + FIELD_COUNT - 1) % FIELD_COUNT; return; }
-    if(sym == XK_Return || sym == XK_KP_Enter){
+    if(key == KEY_TAB){ app.focus = (app.focus + 1) % FIELD_COUNT; return; }
+    if(key == KEY_BACK_TAB){ app.focus = (app.focus + FIELD_COUNT - 1) % FIELD_COUNT; return; }
+    if(key == KEY_ENTER){
       handle_action(app.focus == FIELD_CONFIRM ? ACT_CREATE : ACT_OPEN);
       return;
     }
-    if(sym == XK_BackSpace){ edit_field(0, true); return; }
-    if(n == 1 && text[0] >= 32 && text[0] < 127) edit_field(text[0], false);
+    if(key == KEY_BACKSPACE){ edit_field(0, true); return; }
+    if(key == KEY_CHAR) edit_field(event->ch, false);
     return;
   }
 
-  if(sym == XK_Return || sym == XK_KP_Enter){
+  if(key == KEY_ENTER){
     activate_selection();
-  }else if(sym == XK_Escape && app.screen != SCREEN_ARCHIVE){
+  }else if(key == KEY_ESCAPE && app.screen != SCREEN_ARCHIVE){
     handle_action(ACT_PICK_CANCEL);
-  }else if(sym == XK_BackSpace && app.screen != SCREEN_ARCHIVE && strcmp(app.browser.dir, "/") != 0){
+  }else if(key == KEY_BACKSPACE && app.screen != SCREEN_ARCHIVE && !fs_is_root(app.browser.dir)){
     browser_enter(&app.browser, "..");
-  }else if(sym == XK_Delete && app.screen == SCREEN_ARCHIVE){
+  }else if(key == KEY_DELETE && app.screen == SCREEN_ARCHIVE){
     handle_action(ACT_DELETE);
   }
 }

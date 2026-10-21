@@ -100,7 +100,7 @@ int get_buttons(button *b){
     b[count].color = layouts[app.screen][i].color;
     b[count].x = x;
     b[count].y = BUTTONS_Y;
-    b[count].w = XTextWidth(gui.bold_font, label, (int) strlen(label)) + 36;
+    b[count].w = platform_text_width(FONT_BOLD, label, (int) strlen(label)) + 36;
     b[count].h = BUTTON_H;
     x += b[count].w + 10;
     count++;
