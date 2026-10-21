@@ -141,6 +141,20 @@ static void check_extract_all(archive *a, const char *out_name){
 }
 
 /**
+ * @brief  Reads the format version byte of an archive file.
+ * @param  crls Path of the archive.
+ * @return Version, or -1 if the file cannot be read.
+ */
+static int header_version(const char *crls){
+  FILE *f = fopen(crls, "rb");
+  if(!f) return -1;
+  fseek(f, 6, SEEK_SET);
+  int version = fgetc(f);
+  fclose(f);
+  return version;
+}
+
+/**
  * @brief Opens a copy of the version 2 fixture and checks its contents.
  * @param fixtures Folder holding v2.crls.
  */
@@ -166,7 +180,59 @@ static void check_v2_fixture(const char *fixtures){
     CHECK(strcmp(archive_get_entry(&a, 2)->name, "chunks.bin") == 0);
   }
   CHECK(archive_wasted_space(&a) > 0);                /* The deleted file and the old indexes. */
+  CHECK(a.version == 2);
   check_extract_all(&a, "out_v2");
+
+  /* A version 2 archive can still be modified, and stays version 2... */
+  char file[PATH_MAX];
+  make_file("added.bin", 70000, 5);
+  path_in(file, "added.bin");
+  CHECK(archive_add_file(&a, file));
+  CHECK(a.version == 2);
+
+  /* ...until it is compacted, which converts it to version 3. */
+  CHECK(archive_compact(&a));
+  CHECK(a.version == 3);
+  CHECK(archive_wasted_space(&a) == 0);
+  archive_close(&a);
+
+  CHECK(header_version(crls) == 3);
+  CHECK(!archive_open(&a, crls, "wrong-password"));
+  CHECK(archive_open(&a, crls, "fixture-password"));
+  CHECK(a.version == 3 && a.entries.n == 4);
+  check_extract_all(&a, "out_v2_compacted");
+  archive_free(&a);
+}
+
+/**
+ * @brief Checks that changing any byte of the authenticated part of a version 3
+ *        header makes the archive impossible to open.
+ * @param crls     Path of a closed version 3 archive.
+ * @param password Its password.
+ */
+static void check_header_tampering(const char *crls, const char *password){
+  FILE *f = fopen(crls, "r+b");
+  CHECK(f != NULL);
+  if(!f) return;
+  archive a;
+  archive_init(&a);
+  for(long i = 0; i < V3_AD_BYTES; i++){
+    fseek(f, i, SEEK_SET);
+    int c = fgetc(f);
+    fseek(f, i, SEEK_SET);
+    fputc(c ^ 0xff, f);
+    fflush(f);
+    if(archive_open(&a, crls, password)){
+      printf("FAIL: archive opened with header byte %ld changed\n", i);
+      failures++;
+      archive_close(&a);
+    }
+    fseek(f, i, SEEK_SET);
+    fputc(c, f);
+    fflush(f);
+  }
+  fclose(f);
+  CHECK(archive_open(&a, crls, password));
   archive_free(&a);
 }
 
@@ -203,7 +269,10 @@ int main(int argc, char **argv){
   CHECK(!archive_add_file(&a, crls));                /* Itself. */
   CHECK(a.entries.n == 4);
   CHECK(archive_total_size(&a) == 1000 + CHUNK + 3*CHUNK + 123);
+  CHECK(a.version == 3 && a.header_bytes == V3_HEADER_BYTES);
   archive_close(&a);
+  CHECK(header_version(crls) == 3);
+  check_header_tampering(crls, "password123");
 
   /* Reopen. */
   CHECK(!archive_open(&a, crls, "wrong-password"));

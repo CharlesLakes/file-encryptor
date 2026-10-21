@@ -11,26 +11,37 @@
  * fail returns false (or -1) and records a descriptive message in the status
  * line (see status.h) before returning.
  *
- * @section archive_format File Format (version 2)
+ * @section archive_format File Format (version 3)
  *
  * All integers are stored in little-endian byte order.
  *
  * | Offset | Bytes | Content                                         |
  * |--------|-------|-------------------------------------------------|
  * | 0      | 6     | Magic number: "CRLS" followed by two zero bytes |
- * | 6      | 1     | Format version (2)                              |
+ * | 6      | 1     | Format version (3)                              |
  * | 7      | 1     | Algorithm (1 = Argon2id + XChaCha20-Poly1305)   |
  * | 8      | 8     | Argon2id operations limit                       |
  * | 16     | 8     | Argon2id memory limit                           |
  * | 24     | 16    | Salt                                            |
- * | 40     | 8     | Offset of the current index                     |
- * | 48     | 8     | Length of the current index                     |
- * | 56     | 8     | Reserved (zeros)                                |
- * | 64     | ...   | File contents and indexes                       |
+ * | 40     | 32    | Ed25519 public key that authorizes uploads      |
+ * | 72     | 8     | Offset of the current index                     |
+ * | 80     | 8     | Length of the current index                     |
+ * | 88     | 8     | Reserved (zeros)                                |
+ * | 96     | ...   | File contents and indexes                       |
+ *
+ * Version 2 archives are still opened and modified. Their header is 64 bytes
+ * long, has no public key and keeps the index offset and length at offsets 40
+ * and 48. Compacting a version 2 archive converts it to version 3.
  *
  * @section archive_crypto Cryptography
  *
- * The encryption key is derived from the password and the salt with Argon2id.
+ * A master key is derived from the password and the salt with Argon2id. In
+ * version 3 two subkeys are derived from it with crypto_kdf (context
+ * "CRLS_v3_"): subkey 1 encrypts the contents and the index, and subkey 2 is
+ * the seed of the Ed25519 key pair whose public half is stored in the header.
+ * A server can therefore check that an upload was made by someone who knows
+ * the password without ever learning it (see append.h). Version 2 uses the
+ * master key directly for encryption and has no key pair.
  *
  * Each file is encrypted independently with the secretstream construction
  * (XChaCha20-Poly1305) in chunks of 64 KB. The last chunk carries the final
@@ -38,8 +49,9 @@
  * decrypt. Reading or writing a file requires only one chunk in memory.
  *
  * The index consists of a 24-byte nonce followed by the XChaCha20-Poly1305
- * encryption of the structure below, authenticated together with the first
- * 40 header bytes as associated data:
+ * encryption of the structure below, authenticated together with the header
+ * up to the index pointer (72 bytes in version 3, 40 in version 2) as
+ * associated data:
  *
  * @code
  * u32 number of files
@@ -50,7 +62,7 @@
  * @section archive_consistency Crash Consistency
  *
  * Adding or deleting a file appends a new index at the end of the archive and
- * only afterwards updates the index offset in the header. If the program
+ * only afterwards updates the index pointer in the header. If the program
  * terminates midway, the previous index remains valid. The data of deleted
  * files and superseded indexes remain as unused space until the archive is
  * compacted.
@@ -75,8 +87,14 @@
 #define STREAM_ABYTES   17                /**< Secretstream overhead per chunk. */
 #define V2_HEADER_BYTES 64                /**< Header length of format version 2. */
 #define V2_AD_BYTES     40                /**< Associated data length of version 2. */
-#define MAX_HEADER_BYTES 64               /**< Largest header of any supported version. */
-#define MAX_AD_BYTES    40                /**< Largest associated data of any version. */
+#define V3_HEADER_BYTES 96                /**< Header length of format version 3. */
+#define V3_AD_BYTES     72                /**< Associated data length of version 3. */
+#define MAX_HEADER_BYTES 96               /**< Largest header of any supported version. */
+#define MAX_AD_BYTES    72                /**< Largest associated data of any version. */
+#define SIGN_PK_BYTES   32                /**< Ed25519 public key length. */
+#define SIGN_SK_BYTES   64                /**< Ed25519 secret key length. */
+#define SIGN_BYTES      64                /**< Ed25519 signature length. */
+#define KDF_CONTEXT     "CRLS_v3_"        /**< crypto_kdf context of version 3. */
 #define CHUNK           (64 * 1024)       /**< Plaintext chunk size. */
 #define MAX_NAME        255               /**< Maximum length of a stored file name. */
 #define MAX_PASSWORD    128               /**< Maximum password length. */
@@ -106,6 +124,7 @@ typedef struct{
   char path[PATH_MAX];                         /**< Absolute path or URL of the archive. */
   vector entries;                              /**< archive_entry elements, in index order. */
   unsigned char key[KEY_BYTES];                /**< Derived encryption key. */
+  unsigned char sign_sk[SIGN_SK_BYTES];        /**< Ed25519 secret key (version 3 only). */
   int version;                                 /**< Format version of the open archive. */
   unsigned int header_bytes;                   /**< Header length of that version. */
   unsigned int ad_len;                         /**< Header bytes used as associated data. */
@@ -212,8 +231,9 @@ bool           archive_add_file(archive *a, const char *path);
 bool           archive_delete_entry(archive *a, unsigned int index);
 
 /**
- * @brief  Rewrites the archive keeping only live files. Encrypted chunks are
- *         copied as they are, without being decrypted.
+ * @brief  Rewrites the archive keeping only live files. In version 3 the
+ *         encrypted chunks are copied as they are, without being decrypted; a
+ *         version 2 archive is re-encrypted and converted to version 3.
  * @param  a Archive.
  * @return True on success, false otherwise.
  */

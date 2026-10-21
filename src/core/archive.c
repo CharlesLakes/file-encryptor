@@ -23,6 +23,7 @@
 /** @brief Shared scratch buffers; only one chunk is processed at a time. */
 static unsigned char plain_chunk[CHUNK];
 static unsigned char cipher_chunk[CHUNK + STREAM_ABYTES];
+static unsigned char out_chunk[CHUNK + STREAM_ABYTES];
 
 /* ---------------- Helpers ---------------- */
 
@@ -48,17 +49,50 @@ static void clear_entries(archive *a){
 }
 
 /**
- * @brief  Derives the archive key from the password with Argon2id.
- * @param  a        Archive whose key is written.
+ * @brief  Derives the master key from the password with Argon2id.
+ * @param  master   Output: master key of KEY_BYTES bytes.
  * @param  password Password.
  * @param  salt     Salt of SALT_BYTES bytes.
  * @param  ops      Argon2id operations limit.
  * @param  mem      Argon2id memory limit.
  * @return True on success, false if the derivation fails (e.g. out of memory).
  */
-static bool derive_key(archive *a, const char *password, const unsigned char *salt, uint64_t ops, uint64_t mem){
-  return crypto_pwhash(a->key, KEY_BYTES, password, strlen(password), salt,
+static bool derive_master(unsigned char *master, const char *password, const unsigned char *salt,
+                          uint64_t ops, uint64_t mem){
+  return crypto_pwhash(master, KEY_BYTES, password, strlen(password), salt,
                        ops, (size_t) mem, crypto_pwhash_alg_argon2id13()) == 0;
+}
+
+/**
+ * @brief Derives the version 3 encryption key and Ed25519 key pair of a from
+ *        the master key.
+ * @param a      Archive whose key and sign_sk are written.
+ * @param master Master key.
+ * @param pk     Output: Ed25519 public key of SIGN_PK_BYTES bytes.
+ */
+static void derive_v3_keys(archive *a, const unsigned char *master, unsigned char *pk){
+  unsigned char seed[32];
+  crypto_kdf_derive_from_key(a->key, KEY_BYTES, 1, KDF_CONTEXT, master);
+  crypto_kdf_derive_from_key(seed, sizeof(seed), 2, KDF_CONTEXT, master);
+  crypto_sign_seed_keypair(pk, a->sign_sk, seed);
+  sodium_memzero(seed, sizeof(seed));
+}
+
+/**
+ * @brief  Derives every key of a from the password, as its version requires.
+ * @param  a        Archive with its layout set.
+ * @param  password Password.
+ * @param  header   Header holding the Argon2id parameters and the salt.
+ * @param  pk       Output: Ed25519 public key (version 3 only, may be NULL otherwise).
+ * @return True on success, false if Argon2id fails.
+ */
+static bool derive_keys(archive *a, const char *password, const unsigned char *header, unsigned char *pk){
+  unsigned char master[KEY_BYTES];
+  if(!derive_master(master, password, header + 24, get_le(header + 8, 8), get_le(header + 16, 8))) return false;
+  if(a->version >= 3) derive_v3_keys(a, master, pk);
+  else memcpy(a->key, master, KEY_BYTES);
+  sodium_memzero(master, sizeof(master));
+  return true;
 }
 
 /**
@@ -90,9 +124,9 @@ static int find_entry(archive *a, const char *name){
  */
 static void set_layout(archive *a, int version){
   a->version = version;
-  a->header_bytes = V2_HEADER_BYTES;
-  a->ad_len = V2_AD_BYTES;
-  a->pointer_pos = V2_AD_BYTES;
+  a->header_bytes = version >= 3 ? V3_HEADER_BYTES : V2_HEADER_BYTES;
+  a->ad_len = version >= 3 ? V3_AD_BYTES : V2_AD_BYTES;
+  a->pointer_pos = a->ad_len;
 }
 
 /* ---------------- Index ---------------- */
@@ -215,7 +249,11 @@ bool archive_crypto_init(void){
          crypto_aead_xchacha20poly1305_ietf_abytes() == TAG_BYTES &&
          crypto_secretstream_xchacha20poly1305_headerbytes() == STREAM_HEADER &&
          crypto_secretstream_xchacha20poly1305_abytes() == STREAM_ABYTES &&
-         crypto_secretstream_xchacha20poly1305_statebytes() == sizeof(crypto_secretstream_xchacha20poly1305_state);
+         crypto_secretstream_xchacha20poly1305_statebytes() == sizeof(crypto_secretstream_xchacha20poly1305_state) &&
+         crypto_kdf_keybytes() == KEY_BYTES && crypto_kdf_contextbytes() == strlen(KDF_CONTEXT) &&
+         crypto_sign_seedbytes() == 32 && crypto_sign_publickeybytes() == SIGN_PK_BYTES &&
+         crypto_sign_secretkeybytes() == SIGN_SK_BYTES && crypto_sign_bytes() == SIGN_BYTES &&
+         crypto_generichash_statebytes() == sizeof(crypto_generichash_state);
 }
 
 void archive_init(archive *a){
@@ -228,6 +266,7 @@ void archive_init(archive *a){
 void archive_close(archive *a){
   clear_entries(a);
   sodium_memzero(a->key, sizeof(a->key));
+  sodium_memzero(a->sign_sk, sizeof(a->sign_sk));
   source_close(&a->src);
   if(a->fd >= 0) close(a->fd);
   a->fd = -1;
@@ -259,11 +298,16 @@ static bool load_from_source(archive *a, const char *name, const char *password)
     set_status(true, "%s is not a valid .crls file.", name);
     return false;
   }
-  if(header[6] != 2 || header[7] != 1){
+  if((header[6] != 2 && header[6] != 3) || header[7] != 1){
     set_status(true, "Unsupported .crls version (%d).", header[6]);
     return false;
   }
   set_layout(a, header[6]);
+  if(total < a->header_bytes || !a->src.read_at(&a->src, header + V2_HEADER_BYTES,
+                                                a->header_bytes - V2_HEADER_BYTES, V2_HEADER_BYTES)){
+    set_status(true, "%s is not a valid .crls file.", name);
+    return false;
+  }
 
   uint64_t ops = get_le(header + 8, 8), mem = get_le(header + 16, 8);
   uint64_t offset = get_le(header + a->pointer_pos, 8), length = get_le(header + a->pointer_pos + 8, 8);
@@ -283,7 +327,9 @@ static bool load_from_source(archive *a, const char *name, const char *password)
     return false;
   }
 
-  if(!derive_key(a, password, header + 24, ops, mem)){
+  /* A wrong password, or a tampered public key, makes the index fail to decrypt. */
+  unsigned char pk[SIGN_PK_BYTES];
+  if(!derive_keys(a, password, header, pk)){
     free(blob);
     free(plain);
     set_status(true, "Not enough memory to derive the key.");
@@ -308,6 +354,7 @@ static bool load_from_source(archive *a, const char *name, const char *password)
 
   if(!ok){
     sodium_memzero(a->key, sizeof(a->key));
+    sodium_memzero(a->sign_sk, sizeof(a->sign_sk));
     return false;
   }
 
@@ -356,16 +403,16 @@ bool archive_create_params(archive *a, const char *path, const char *password, u
   }
   fs_lock(fd);
 
-  set_layout(a, 2);
+  set_layout(a, 3);
   unsigned char header[MAX_HEADER_BYTES] = {0};
   memcpy(header, MAGIC, MAGIC_BYTES);
-  header[6] = 2;
+  header[6] = 3;
   header[7] = 1;
   put_le(header + 8, ops, 8);
   put_le(header + 16, mem, 8);
   randombytes_buf(header + 24, SALT_BYTES);
 
-  if(!derive_key(a, password, header + 24, ops, mem)){
+  if(!derive_keys(a, password, header, header + 40)){
     close(fd);
     unlink(path);
     set_status(true, "Not enough memory to derive the key.");
@@ -377,6 +424,7 @@ bool archive_create_params(archive *a, const char *path, const char *password, u
   if(!write_at(fd, header, a->header_bytes, 0) || !write_index_to(a, fd)){
     if(!status_error) set_status(true, "Could not write %s: %s", path, strerror(errno));
     sodium_memzero(a->key, sizeof(a->key));
+    sodium_memzero(a->sign_sk, sizeof(a->sign_sk));
     close(fd);
     unlink(path);
     return false;
@@ -508,6 +556,115 @@ bool archive_delete_entry(archive *a, unsigned int index){
   return true;
 }
 
+/* ---------------- Decryption of entries ---------------- */
+
+/**
+ * @brief Receives the plaintext of an entry, one chunk at a time.
+ * @param ctx   State of the receiver.
+ * @param plain Decrypted chunk.
+ * @param len   Length of the chunk.
+ * @param final True for the last chunk.
+ * @return True to continue, false to stop with an error.
+ */
+typedef bool (*chunk_sink)(void *ctx, const unsigned char *plain, size_t len, bool final);
+
+/**
+ * @brief  Decrypts an entry chunk by chunk and passes each chunk to sink.
+ * @param  a       Archive the entry is read from.
+ * @param  e       Entry.
+ * @param  key     Key the entry was encrypted with.
+ * @param  sink    Receiver of the plaintext.
+ * @param  ctx     State of the receiver.
+ * @param  damaged Output: on failure, true if the ciphertext was at fault and
+ *                 false if the sink was.
+ * @return True on success, false otherwise.
+ */
+static bool pull_entry(archive *a, const archive_entry *e, const unsigned char *key,
+                       chunk_sink sink, void *ctx, bool *damaged){
+  crypto_secretstream_xchacha20poly1305_state state;
+  bool ok = crypto_secretstream_xchacha20poly1305_init_pull(&state, e->stream_header, key) == 0;
+  bool final = false;
+  uint64_t consumed = 0, produced = 0;
+  *damaged = !ok;
+
+  while(ok && !final){
+    uint64_t left = e->stored - consumed;
+    size_t n = left < sizeof(cipher_chunk) ? (size_t) left : sizeof(cipher_chunk);
+    unsigned long long plain_size;
+    unsigned char tag;
+    if(n < STREAM_ABYTES || !a->src.read_at(&a->src, cipher_chunk, n, e->offset + consumed) ||
+       crypto_secretstream_xchacha20poly1305_pull(&state, plain_chunk, &plain_size, &tag,
+                                                  cipher_chunk, n, NULL, 0) != 0){
+      ok = false;
+      *damaged = true;
+      break;
+    }
+    consumed += n;
+    final = tag == crypto_secretstream_xchacha20poly1305_tag_final();
+    if(final != (consumed == e->stored)){
+      ok = false;
+      *damaged = true;
+      break;
+    }
+    produced += plain_size;
+    ok = sink(ctx, plain_chunk, (size_t) plain_size, final);
+  }
+  if(ok && produced != e->size){
+    ok = false;
+    *damaged = true;
+  }
+  sodium_memzero(plain_chunk, sizeof(plain_chunk));
+  sodium_memzero(&state, sizeof(state));
+  return ok;
+}
+
+/** @brief State of push_sink(). */
+typedef struct{
+  crypto_secretstream_xchacha20poly1305_state state;   /**< Stream being encrypted. */
+  int fd;                                              /**< Destination file. */
+  uint64_t position;                                   /**< Next write offset. */
+}push_ctx;
+
+/** @brief chunk_sink that encrypts each chunk again and writes it to a file. */
+static bool push_sink(void *ctx, const unsigned char *plain, size_t len, bool final){
+  push_ctx *c = (push_ctx *) ctx;
+  unsigned char tag = final ? crypto_secretstream_xchacha20poly1305_tag_final()
+                            : crypto_secretstream_xchacha20poly1305_tag_message();
+  unsigned long long cipher_size;
+  crypto_secretstream_xchacha20poly1305_push(&c->state, out_chunk, &cipher_size, plain, len, NULL, 0, tag);
+  bool ok = write_at(c->fd, out_chunk, (size_t) cipher_size, c->position);
+  c->position += cipher_size;
+  return ok;
+}
+
+/**
+ * @brief  Decrypts an entry with old_key and encrypts it again with a->key,
+ *         writing the result to fd at position. On success the stream header
+ *         of e is replaced; its offset is left to the caller.
+ * @param  a        Archive.
+ * @param  e        Entry.
+ * @param  old_key  Key the entry is currently encrypted with.
+ * @param  fd       Destination file.
+ * @param  position Destination offset.
+ * @return True on success, false otherwise.
+ */
+static bool reencrypt_entry(archive *a, archive_entry *e, const unsigned char *old_key, int fd, uint64_t position){
+  push_ctx c;
+  unsigned char stream_header[STREAM_HEADER];
+  c.fd = fd;
+  c.position = position;
+  crypto_secretstream_xchacha20poly1305_init_push(&c.state, stream_header, a->key);
+
+  bool damaged;
+  bool ok = pull_entry(a, e, old_key, push_sink, &c, &damaged) && c.position - position == e->stored;
+  sodium_memzero(&c.state, sizeof(c.state));
+  if(ok) memcpy(e->stream_header, stream_header, STREAM_HEADER);
+  else if(damaged) set_status(true, "The content of %s is damaged.", e->name);
+  return ok;
+}
+
+/* ---------------- Compaction ---------------- */
+
 bool archive_compact(archive *a){
   status_error = false;
   char tmp_path[PATH_MAX + 8];
@@ -518,34 +675,62 @@ bool archive_compact(archive *a){
     return false;
   }
 
+  /* Everything that compaction changes, to restore it on failure. */
+  unsigned int n = a->entries.n;
+  archive_entry *saved = (archive_entry *) malloc(sizeof(archive_entry) * (n ? n : 1));
+  unsigned char saved_key[KEY_BYTES], saved_sk[SIGN_SK_BYTES], saved_ad[MAX_AD_BYTES];
+  int saved_version = a->version;
+  uint64_t saved_index_offset = a->index_offset, saved_index_length = a->index_length;
+  memcpy(saved_key, a->key, KEY_BYTES);
+  memcpy(saved_sk, a->sign_sk, SIGN_SK_BYTES);
+  memcpy(saved_ad, a->header_ad, MAX_AD_BYTES);
+  if(saved) memcpy(saved, a->entries.arr, sizeof(archive_entry) * n);
+
+  /* A version 2 archive is converted: its key is the master key of version 3. */
+  bool upgrade = a->version < 3;
   unsigned char header[MAX_HEADER_BYTES] = {0};
   memcpy(header, a->header_ad, a->ad_len);
-  bool ok = write_at(fd, header, a->header_bytes, 0);
+  if(upgrade){
+    header[6] = 3;
+    set_layout(a, 3);
+    derive_v3_keys(a, saved_key, header + 40);
+    memcpy(a->header_ad, header, a->ad_len);
+  }
+  bool ok = saved && write_at(fd, header, a->header_bytes, 0);
 
   uint64_t position = a->header_bytes;
-  uint64_t *old_offsets = (uint64_t *) malloc(sizeof(uint64_t) * (a->entries.n ? a->entries.n : 1));
-  ok = ok && old_offsets;
-  for(unsigned int i = 0; ok && i < a->entries.n; i++){
+  for(unsigned int i = 0; ok && i < n; i++){
     archive_entry *e = archive_get_entry(a, i);
-    old_offsets[i] = e->offset;
-    for(uint64_t copied = 0; ok && copied < e->stored; ){
-      size_t n = e->stored - copied < sizeof(cipher_chunk) ? (size_t) (e->stored - copied) : sizeof(cipher_chunk);
-      ok = a->src.read_at(&a->src, cipher_chunk, n, e->offset + copied) &&
-           write_at(fd, cipher_chunk, n, position + copied);
-      copied += n;
+    if(upgrade){
+      ok = reencrypt_entry(a, e, saved_key, fd, position);
+    }else{
+      for(uint64_t copied = 0; ok && copied < e->stored; ){
+        size_t len = e->stored - copied < sizeof(cipher_chunk) ? (size_t) (e->stored - copied) : sizeof(cipher_chunk);
+        ok = a->src.read_at(&a->src, cipher_chunk, len, e->offset + copied) &&
+             write_at(fd, cipher_chunk, len, position + copied);
+        copied += len;
+      }
     }
     e->offset = position;
     position += e->stored;
   }
 
-  uint64_t old_index_offset = a->index_offset, old_index_length = a->index_length;
   ok = ok && write_index_to(a, fd) && fs_replace_file(tmp_path, &fd, a->path, &a->fd);
 
   if(!ok){
-    for(unsigned int i = 0; old_offsets && i < a->entries.n; i++) archive_get_entry(a, i)->offset = old_offsets[i];
-    a->index_offset = old_index_offset;
-    a->index_length = old_index_length;
-    free(old_offsets);
+    if(saved) memcpy(a->entries.arr, saved, sizeof(archive_entry) * n);
+    memcpy(a->key, saved_key, KEY_BYTES);
+    memcpy(a->sign_sk, saved_sk, SIGN_SK_BYTES);
+    memcpy(a->header_ad, saved_ad, MAX_AD_BYTES);
+    set_layout(a, saved_version);
+    a->index_offset = saved_index_offset;
+    a->index_length = saved_index_length;
+  }
+  sodium_memzero(saved_key, sizeof(saved_key));
+  sodium_memzero(saved_sk, sizeof(saved_sk));
+  free(saved);
+
+  if(!ok){
     if(fd >= 0) close(fd);
     unlink(tmp_path);
     if(a->fd < 0){
@@ -559,12 +744,26 @@ bool archive_compact(archive *a){
     return false;
   }
 
-  free(old_offsets);
   source_from_fd(&a->src, a->fd);
   return true;
 }
 
 /* ---------------- Extraction ---------------- */
+
+/** @brief State of file_sink(). */
+typedef struct{
+  int fd;                    /**< Destination file. */
+  uint64_t written;          /**< Bytes written so far. */
+}file_ctx;
+
+/** @brief chunk_sink that writes the plaintext to a file. */
+static bool file_sink(void *ctx, const unsigned char *plain, size_t len, bool final){
+  file_ctx *c = (file_ctx *) ctx;
+  (void) final;
+  bool ok = write_at(c->fd, plain, len, c->written);
+  c->written += len;
+  return ok;
+}
 
 int archive_extract_entry(archive *a, unsigned int index, const char *dir){
   archive_entry *e = archive_get_entry(a, index);
@@ -575,44 +774,16 @@ int archive_extract_entry(archive *a, unsigned int index, const char *dir){
 
   char path[PATH_MAX];
   join_path(path, sizeof(path), dir, e->name);
-  int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_BINARY, 0600);
-  if(fd < 0){
+  file_ctx c = {open(path, O_WRONLY | O_CREAT | O_EXCL | O_BINARY, 0600), 0};
+  if(c.fd < 0){
     if(errno == EEXIST) return 0;
     set_status(true, "Could not create %s: %s", path, strerror(errno));
     return -1;
   }
 
-  crypto_secretstream_xchacha20poly1305_state state;
-  bool ok = crypto_secretstream_xchacha20poly1305_init_pull(&state, e->stream_header, a->key) == 0;
-  bool final = false, damaged = !ok;
-  uint64_t consumed = 0, written = 0;
-
-  while(ok && !final){
-    uint64_t left = e->stored - consumed;
-    size_t n = left < sizeof(cipher_chunk) ? (size_t) left : sizeof(cipher_chunk);
-    unsigned long long plain_size;
-    unsigned char tag;
-    if(n < STREAM_ABYTES || !a->src.read_at(&a->src, cipher_chunk, n, e->offset + consumed) ||
-       crypto_secretstream_xchacha20poly1305_pull(&state, plain_chunk, &plain_size, &tag,
-                                                  cipher_chunk, n, NULL, 0) != 0){
-      ok = false;
-      damaged = true;
-      break;
-    }
-    consumed += n;
-    final = tag == crypto_secretstream_xchacha20poly1305_tag_final();
-    if(final != (consumed == e->stored)){
-      ok = false;
-      damaged = true;
-      break;
-    }
-    ok = write_at(fd, plain_chunk, (size_t) plain_size, written);
-    written += plain_size;
-  }
-  sodium_memzero(plain_chunk, sizeof(plain_chunk));
-  sodium_memzero(&state, sizeof(state));
-
-  ok = close(fd) == 0 && ok && written == e->size;
+  bool damaged;
+  bool ok = pull_entry(a, e, a->key, file_sink, &c, &damaged);
+  ok = close(c.fd) == 0 && ok;
   if(!ok){
     unlink(path);
     if(damaged) set_status(true, "The content of %s is damaged.", e->name);
