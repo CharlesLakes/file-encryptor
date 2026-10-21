@@ -1,15 +1,20 @@
 # FileEncryptor
 
 A small desktop app, written in C, that keeps files inside an encrypted,
-password-protected archive with the `.crls` extension.
+password-protected archive with the `.crls` extension. Archives can also be
+published over HTTP(S) and read, or added to, from anywhere that knows the
+password.
 
 - **Encryption:** Argon2id derives the key from the password. XChaCha20-Poly1305
   encrypts each file in 64 KB chunks and also encrypts the index.
 - **GUI:** one window with four screens, drawn with plain Xlib on Linux and
   with Win32/GDI on Windows.
-- **No `-dev` packages on Linux:** the Xlib and libsodium declarations the code
-  needs are written by hand in `src/deps/`, so you only need the runtime
-  libraries.
+- **Remote archives:** open `https://…/file.crls` in the GUI, or serve a folder
+  with `file-encryptor --server`. Files are encrypted on the client: the server
+  never sees the password or the contents.
+- **No `-dev` packages on Linux:** the Xlib, libsodium and libcurl declarations
+  the code needs are written by hand in `src/deps/`, so you only need the
+  runtime libraries.
 
 ## Build and run
 
@@ -17,7 +22,9 @@ password-protected archive with the `.crls` extension.
 
 Requirements: `gcc`, `cmake` (3.16 or newer), `libX11.so.6` and
 `libsodium.so.23`. Both libraries come with most Linux desktops (on
-Debian/Ubuntu they are the packages `libx11-6` and `libsodium23`).
+Debian/Ubuntu they are the packages `libx11-6` and `libsodium23`). Opening
+archives by URL also needs `libcurl.so.4` (`libcurl4`), which is loaded only
+when it is used.
 
 ```sh
 cmake -B build                 # configure (once)
@@ -34,13 +41,16 @@ Install [MSYS2](https://www.msys2.org/), open the **UCRT64** shell and run:
 pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake \
                    mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-libsodium
 cmake -B build -G Ninja        # the Windows backend is picked automatically
-cmake --build build            # builds build/file-encryptor.exe
+cmake --build build            # builds file-encryptor.exe and file-encryptor-cli.exe
 ./build/file-encryptor.exe
 ctest --test-dir build
 ```
 
-To run the program outside the MSYS2 shell, copy `libsodium-26.dll` from
-`C:\msys64\ucrt64\bin` next to `file-encryptor.exe`.
+`file-encryptor.exe` is the GUI. `file-encryptor-cli.exe` is the same program
+built as a console application: use it for `--server` and `--upload`. To run
+either outside the MSYS2 shell, copy `libsodium-26.dll` from
+`C:\msys64\ucrt64\bin` next to it. HTTPS uses WinHTTP, which is part of
+Windows.
 
 To cross-compile from Linux with MinGW-w64, use the
 [prebuilt libsodium for MinGW](https://download.libsodium.org/libsodium/releases/):
@@ -53,12 +63,14 @@ cmake --build build-win
 
 ## Using it
 
-1. **Open screen:** pick a `.crls` file in the list or type its path, then type
-   the password and press **Open**. To make a new archive, type a name, fill in
-   both password fields (at least 8 characters) and press **Create new**.
+1. **Open screen:** pick a `.crls` file in the list or type its path (or its
+   `http://` / `https://` URL), then type the password and press **Open**. To
+   make a new archive, type a name, fill in both password fields (at least 8
+   characters) and press **Create new**.
 2. **Archive screen:** **Add** and **Extract** open a folder browser.
    **Delete** must be pressed twice to confirm. Deleted data stays in the file as
-   unused space until you press **Compact**.
+   unused space until you press **Compact**. On a remote archive, **Add**
+   uploads the file, and Delete and Compact are not available.
 3. Keys: arrow keys, PgUp/PgDn and Home/End move the selection. Enter runs the
    selected item, Esc cancels, Backspace goes up one folder, Tab switches
    between fields, Delete removes the selected file.
@@ -66,22 +78,86 @@ cmake --build build-win
 Extraction never overwrites anything: a file that already exists in the target
 folder is skipped.
 
+## Sharing archives over HTTP
+
+### Serving a folder
+
+```sh
+file-encryptor --server ~/vaults                       # http://127.0.0.1:8080/
+file-encryptor --server ~/vaults --bind 0.0.0.0 --port 9000 --max-upload 2147483648
+```
+
+| Request             | What it does                                           |
+|---------------------|--------------------------------------------------------|
+| `GET /`             | Names of the `.crls` files, one per line               |
+| `GET /name.crls`    | The encrypted archive as it is (Range requests work)   |
+| `POST /name.crls`   | Signed upload of a new file (see below)                |
+
+The server never needs a password: anyone can download the encrypted bytes
+(for example with `curl -O http://host:8080/name.crls`), but only someone with
+the password can read them or add files. The server does not create new
+archives: create one locally and copy it into the folder. It refuses uploads
+while the archive is open in the GUI on the same machine, and uploads need an
+archive in format version 3 (compact older archives once).
+
+The server speaks plain HTTP and listens on `127.0.0.1` by default. To publish
+it, put a reverse proxy with HTTPS in front of it, for example Caddy:
+
+```
+vault.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+With nginx, disable request buffering and allow large bodies so uploads stream
+through: `proxy_request_buffering off; client_max_body_size 2g;`, and do not
+compress `application/octet-stream` (compression breaks byte ranges).
+
+### Reading and uploading
+
+- **GUI:** type the URL in the path field and open it as usual.
+- **Command line:** `file-encryptor --upload https://vault.example.com/name.crls file1 file2`
+  asks for the password without echoing it (or reads it as one line from
+  standard input, for scripts).
+- Reading works from any HTTP server that supports Range requests (nginx,
+  Apache, object storage…); uploading needs `file-encryptor --server`.
+
+With the wrong password nothing is shown and nothing can be uploaded. Only the
+new file and the new index are sent; existing files are never sent again.
+
 ## Repository layout
 
 ```
-CMakeLists.txt        build: core library, program and tests
+CMakeLists.txt        build: core library, server, CLI, program and tests
 cmake/
   mingw-w64.cmake     toolchain file to cross-compile for Windows
 src/
-  main.c              entry point: init + event loop
+  main.c              entry point: GUI, or --server / --upload
   core/               program logic, no UI code
     archive.h/.c      the .crls format: open, create, add, extract, delete, compact
+    source.h/.c       where archive bytes are read from (a local file or a URL)
+    append.h/.c       signed uploads: built by the client, checked by the server
+    remote.h/.c       archives at http(s) URLs: Range reads with a cache, uploads
     browser.h/.c      list of one folder's contents (filtered and sorted)
+    httpmsg.h/.c      strict HTTP/1.1 parsing (requests, ranges, hex)
     status.h/.c       the status line message (set_status)
     util.h/.c         little-endian ints, sizes, paths
-    fs.h              everything that differs between operating systems
+    fs.h              files and paths: everything that differs between systems
     fs_posix.c        ... for Linux (pread, flock, realpath, rename)
     fs_win32.c        ... for Windows (ReadFile, LockFileEx, MoveFileEx)
+    net.h             TCP sockets
+    net_posix.c       ... BSD sockets
+    net_win32.c       ... Winsock
+    http.h            HTTP(S) requests
+    http_curl.c       ... libcurl, loaded with dlopen()
+    http_winhttp.c    ... WinHTTP
+  server/
+    server.h/.c       the --server mode
+  cli/
+    cli.h/.c          the --upload mode
+    tty.h             password prompt without echo
+    tty_posix.c       ... termios
+    tty_win32.c       ... console mode
   ui/                 GUI
     ui.h              shared state (app), constants, all UI prototypes
     platform.h        window, events, drawing and fonts, independent of the OS
@@ -94,19 +170,29 @@ src/
   deps/               hand-written declarations of external libraries
     xlib.h            used only by platform_x11.c
     sodium.h
+    curl.h            used only by http_curl.c
   lib/
     vector.h/.c       generic dynamic array (copied from EDDs-in-C)
 tests/
-  test_archive.c      end-to-end test of core/archive.c
+  test_util.h/.c      CHECK(), temporary folders, files with known contents
+  server_fixture.h/.c runs the server in a thread for the tests
+  test_archive.c      the .crls format, versions 2 and 3
+  test_append.c       signed uploads without a network
+  test_httpmsg.c      the HTTP parser, including malformed requests
+  test_server.c       the server over real sockets
+  test_remote.c       URL reading and uploading against the server (needs libcurl)
+  test_cli.c          --upload (needs libcurl)
   fixtures/v2.crls    archive written by the version 2 format (compatibility test)
 ```
 
-Dependencies only go downward: `main → ui → core → lib/deps`. Nothing in
-`core/` includes `ui/`, so the core can be tested without a display.
+Dependencies only go downward: `main → ui / server / cli → core → lib/deps`.
+Nothing in `core/` includes `ui/`, `server/` or `cli/`, so the core can be tested
+without a display.
 
-CMake picks one `fs_*.c` and one `platform_*.c` from the target system
-(`WIN32` or not). No other file contains operating system specific code, except
-for a few `#ifdef _WIN32` lines in `tests/test_archive.c`.
+CMake picks the `*_posix.c` / `*_x11.c` / `http_curl.c` files or the
+`*_win32.c` / `http_winhttp.c` files from the target system (`WIN32` or not).
+No other file contains operating system specific code, except for a few
+`#ifdef _WIN32` lines in the tests.
 
 ## How it works
 
@@ -130,12 +216,14 @@ See the comment at the top of `src/core/archive.h` for the byte-level layout.
 In short:
 
 ```
-[64 byte header][file 1 chunks][file 2 chunks]...[index][file 3 chunks][index]...
-                                                         ▲ header points to the latest index
+[96 byte header][file 1 chunks][file 2 chunks]...[index][file 3 chunks][index]...
+                                                          ▲ header points to the latest index
 ```
 
-- The header holds the Argon2id parameters, the salt and the position of the
-  current index.
+- The header holds the Argon2id parameters, the salt, the public key that
+  authorizes uploads and the position of the current index.
+- Two keys are derived from the password: one encrypts, the other signs
+  uploads (Ed25519). Only the public half of the second is stored.
 - Each file is a separate secretstream, so a truncated or reordered file fails
   to decrypt.
 - The index (names, sizes, offsets) is encrypted and authenticated together
@@ -144,24 +232,47 @@ In short:
   the program stops halfway, the previous index still works.
 - **Compact** copies the live encrypted chunks into `<name>.tmp` without
   decrypting them, writes a fresh index and renames the temp file over the
-  original.
+  original. Compacting a version 2 archive (64 byte header, no upload key)
+  re-encrypts it into version 3.
 
 Every `.crls` file starts with the magic bytes `CRLS` followed by two zero
 bytes.
 
+### Remote archives and uploads
+
+A remote archive is read through `Range` requests: opening downloads the header
+and the index, extracting a file downloads only that file. Every request sends
+`If-Match` with the archive's ETag, so a client notices when the archive was
+replaced (compacted) on the server.
+
+An upload is built entirely on the client (`core/append.h`): it encrypts the
+file, builds the new index and signs a message that covers the current index
+(through its random nonce), the lengths and a BLAKE2b hash of the body. The
+server checks the signature with the public key from the header **before**
+reading the body, appends the body, checks its hash and only then moves the
+index pointer; any failure truncates the file back. If another client uploaded
+first, the server answers 409 and the client rebuilds only the index on top of
+the new state and tries again.
+
 ## Contributing (humans and LLMs)
 
-- **Where things go:** format or crypto changes go in `core/archive.c`. A new
+- **Where things go:** format or crypto changes go in `core/archive.c`; the
+  upload protocol in `core/append.c` (both sides) and `server/server.c`. A new
   button means an `ACT_*` in `ui/ui.h`, an entry in `get_buttons()`
   (`layout.c`) and a `case` in `handle_action()` (`actions.c`). Painting goes
   in `draw.c`.
-- **Using a new libsodium or Xlib function:** declare it in `src/deps/` with the
-  exact signature from the real header.
-- **Operating system specific code:** file and path operations go in
-  `core/fs.h` with one implementation in each `fs_*.c`; windowing goes in
-  `ui/platform.h` with one implementation in each `platform_*.c`. Always add
-  `O_BINARY` to `open()` flags, and use `fs_basename()` / `fs_is_separator()`
-  instead of looking for `'/'`.
+- **Using a new libsodium, Xlib or libcurl function:** declare it in
+  `src/deps/` with the exact signature from the real header. libcurl options
+  must go through the typed wrappers in `http_curl.c`.
+- **Operating system specific code:** files and paths go in `core/fs.h`,
+  sockets in `core/net.h`, HTTP clients in `core/http.h`, password prompts in
+  `cli/tty.h` and windowing in `ui/platform.h`, each with one implementation
+  per system. Always add `O_BINARY` to `open()` flags, and use `fs_basename()`
+  / `fs_is_separator()` / `fs_is_absolute()` instead of looking for `'/'`.
+- **Network input is hostile:** anything read from a socket or an HTTP
+  response goes through the strict parsers in `core/httpmsg.c`, and every
+  length is checked before it is used. Add a case to `tests/test_httpmsg.c`
+  when you accept something new.
 - **Style:** C11, two-space indentation, `snake_case`, `static` for anything
   private to a file. Every file starts with a Doxygen block (`@file`, `@brief`,
   `@author`, `Maintainer:`) and public functions are documented in their
@@ -174,7 +285,7 @@ bytes.
   the `src/` include path and flags.
 - **Before committing:** `cmake --build build && ctest --test-dir build` must
   finish with no warnings and no failed tests. If you change the format, add a
-  test in `tests/test_archive.c`.
+  test in `tests/test_archive.c`; never regenerate `tests/fixtures/v2.crls`.
 - **Commit messages:** follow
   [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):
   `<type>[optional scope]: <description>`, e.g. `feat(ui): add Windows backend`
