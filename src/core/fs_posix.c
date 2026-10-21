@@ -76,6 +76,25 @@ bool fs_replace_file(const char *from, int *from_fd, const char *to, int *to_fd)
   return true;
 }
 
+int fs_open_regular(const char *path, bool write){
+  /* O_NONBLOCK keeps a FIFO from blocking the open; it is cleared afterwards. */
+  int fd = open(path, (write ? O_RDWR : O_RDONLY) | O_NOFOLLOW | O_NONBLOCK | O_BINARY);
+  struct stat info;
+  if(fd >= 0 && (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode))){
+    close(fd);
+    return -1;
+  }
+  if(fd >= 0) fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
+  return fd;
+}
+
+bool fs_file_id(int fd, char *out, size_t out_size){
+  struct stat info;
+  if(fstat(fd, &info) != 0) return false;
+  snprintf(out, out_size, "%llx-%llx", (unsigned long long) info.st_dev, (unsigned long long) info.st_ino);
+  return true;
+}
+
 int fs_temp_file(void){
   const char *dir = getenv("TMPDIR");
   char path[PATH_MAX];

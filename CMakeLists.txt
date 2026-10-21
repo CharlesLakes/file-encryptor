@@ -63,17 +63,31 @@ target_compile_definitions(crls_core PUBLIC _DEFAULT_SOURCE ${PLATFORM_DEFS})
 target_compile_options(crls_core PUBLIC -Wall -Wextra -Wno-sign-compare)
 target_link_libraries(crls_core PUBLIC ${SODIUM_LIB} ${SYSTEM_LIBS})
 
+# ---------------- Server ----------------
+
+add_library(crls_server STATIC src/server/server.c)
+target_link_libraries(crls_server PUBLIC crls_core)
+
 # ---------------- Program ----------------
 
-add_executable(file-encryptor WIN32
-  src/main.c
+set(UI_SRC
   src/ui/actions.c
   src/ui/draw.c
   src/ui/input.c
   src/ui/layout.c
   ${GUI_SRC}
 )
-target_link_libraries(file-encryptor PRIVATE crls_core ${GUI_LIBS})
+
+add_executable(file-encryptor WIN32 src/main.c ${UI_SRC})
+target_link_libraries(file-encryptor PRIVATE crls_server ${GUI_LIBS})
+
+# The GUI executable has no console on Windows; this one runs the
+# command-line modes (--server, --upload) with one.
+if(WIN32)
+  add_executable(file-encryptor-cli src/main.c ${UI_SRC})
+  target_compile_definitions(file-encryptor-cli PRIVATE CRLS_CONSOLE)
+  target_link_libraries(file-encryptor-cli PRIVATE crls_server ${GUI_LIBS})
+endif()
 
 # ---------------- Tests ----------------
 
@@ -93,3 +107,8 @@ add_test(NAME append COMMAND test-append ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtu
 add_executable(test-httpmsg tests/test_httpmsg.c)
 target_link_libraries(test-httpmsg PRIVATE test_util)
 add_test(NAME httpmsg COMMAND test-httpmsg)
+
+find_package(Threads REQUIRED)
+add_executable(test-server tests/test_server.c)
+target_link_libraries(test-server PRIVATE test_util crls_server Threads::Threads)
+add_test(NAME server COMMAND test-server ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)

@@ -1,7 +1,16 @@
 /**
  * @file    main.c
- * @brief   Program entry point: initializes libsodium and the window, then
- *          runs the event loop.
+ * @brief   Program entry point: runs the GUI, or a command-line mode when
+ *          arguments are given.
+ *
+ * | Command                                  | Mode                          |
+ * |------------------------------------------|-------------------------------|
+ * | file-encryptor                           | GUI                           |
+ * | file-encryptor --server <folder> [...]   | HTTP server (server/server.h) |
+ *
+ * On Windows the GUI executable has no console, so the command-line modes are
+ * meant to be run with file-encryptor-cli.exe, which is the same program built
+ * as a console application (CRLS_CONSOLE).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
@@ -9,7 +18,10 @@
  * Refer to README.md for the module overview and to ui/ui.h for the event flow.
  */
 
+#include <stdio.h>
+#include <string.h>
 #include "core/archive.h"
+#include "server/server.h"
 #include "ui/ui.h"
 
 /**
@@ -22,11 +34,38 @@ static void redraw(void){
   draw();
 }
 
-int main(void){
+/**
+ * @brief Prints the command-line usage.
+ */
+static void usage(void){
+  fprintf(stderr, "usage: file-encryptor                      start the GUI\n"
+                  "       file-encryptor --server <folder>    serve the .crls files of a folder\n"
+                  "Run file-encryptor --server for the server options.\n");
+}
+
+/**
+ * @brief  Runs a command-line mode.
+ * @param  argc Number of arguments.
+ * @param  argv Arguments.
+ * @return Process exit code.
+ */
+static int run_command(int argc, char **argv){
+  if(strcmp(argv[1], "--server") == 0) return server_main(argc - 1, argv + 1);
+  usage();
+  return strcmp(argv[1], "--help") == 0 ? 0 : 2;
+}
+
+int main(int argc, char **argv){
   if(!archive_crypto_init()){
-    platform_error("Could not initialize libsodium.");
+    if(argc > 1) fprintf(stderr, "Could not initialize libsodium.\n");
+    else platform_error("Could not initialize libsodium.");
     return 1;
   }
+  if(argc > 1) return run_command(argc, argv);
+#ifdef CRLS_CONSOLE
+  usage();
+  return 2;
+#endif
 
   app_init();
   if(!platform_open(MIN_WIDTH, MIN_HEIGHT, ".crls manager", COLOR_BG)){

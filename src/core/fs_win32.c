@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <io.h>
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
@@ -143,6 +144,31 @@ bool fs_replace_file(const char *from, int *from_fd, const char *to, int *to_fd)
   *from_fd = -1;
   *to_fd = reopen(to, true);
   return *to_fd >= 0;
+}
+
+int fs_open_regular(const char *path, bool write){
+  /* FILE_SHARE_DELETE lets the GUI compact (replace) the file while it is open here. */
+  HANDLE h = CreateFileA(path, GENERIC_READ | (write ? GENERIC_WRITE : 0),
+                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+  if(h == INVALID_HANDLE_VALUE) return -1;
+  BY_HANDLE_FILE_INFORMATION info;
+  if(!GetFileInformationByHandle(h, &info) || GetFileType(h) != FILE_TYPE_DISK ||
+     (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))){
+    CloseHandle(h);
+    return -1;
+  }
+  int fd = _open_osfhandle((intptr_t) h, (write ? _O_RDWR : _O_RDONLY) | _O_BINARY);
+  if(fd < 0) CloseHandle(h);
+  return fd;
+}
+
+bool fs_file_id(int fd, char *out, size_t out_size){
+  BY_HANDLE_FILE_INFORMATION info;
+  if(!GetFileInformationByHandle(handle_of(fd), &info)) return false;
+  snprintf(out, out_size, "%lx-%lx%08lx", (unsigned long) info.dwVolumeSerialNumber,
+           (unsigned long) info.nFileIndexHigh, (unsigned long) info.nFileIndexLow);
+  return true;
 }
 
 int fs_temp_file(void){

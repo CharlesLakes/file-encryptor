@@ -115,6 +115,26 @@ bool        fs_absolute_path(const char *path, char *out);
 bool        fs_replace_file(const char *from, int *from_fd, const char *to, int *to_fd);
 
 /**
+ * @brief  Opens an existing regular file, refusing symbolic links (or reparse
+ *         points), folders, devices and pipes.
+ * @param  path  Path of the file.
+ * @param  write True for read-write access, false for read-only.
+ * @return File descriptor, or -1 on error.
+ */
+int         fs_open_regular(const char *path, bool write);
+
+/**
+ * @brief  Describes the identity of an open file (device and inode, or volume
+ *         and file index). It changes when the file is replaced, for example
+ *         by archive_compact(), but not when it is modified in place.
+ * @param  fd       File descriptor.
+ * @param  out      Destination buffer.
+ * @param  out_size Capacity of out (64 bytes are enough).
+ * @return True on success, false otherwise.
+ */
+bool        fs_file_id(int fd, char *out, size_t out_size);
+
+/**
  * @brief  Creates an anonymous temporary file, deleted when it is closed.
  * @return Read-write file descriptor, or -1 on error.
  */
