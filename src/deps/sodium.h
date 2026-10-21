@@ -16,9 +16,11 @@
 #ifndef DEPS_SODIUM_H
 #define DEPS_SODIUM_H
 
-#include <stdalign.h>
 #include <stddef.h>
 #include <stdint.h>
+
+/* The library is written in C: its symbols are not mangled. */
+extern "C"{
 
 /**
  * @brief Opaque secretstream state; its layout matches the official header.
@@ -98,5 +100,7 @@ int    crypto_secretstream_xchacha20poly1305_pull(crypto_secretstream_xchacha20p
                                                   unsigned char *tag,
                                                   const unsigned char *c, unsigned long long clen,
                                                   const unsigned char *ad, unsigned long long adlen);
+
+}
 
 #endif

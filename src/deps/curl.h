@@ -30,6 +30,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* The library is written in C: its symbols are not mangled. */
+extern "C"{
+
 typedef void CURL;
 typedef int CURLcode;
 typedef int64_t curl_off_t;
@@ -85,5 +88,7 @@ typedef struct{
   struct curl_slist* (*slist_append)(struct curl_slist *list, const char *string);
   void               (*slist_free_all)(struct curl_slist *list);
 }curl_api;
+
+}
 
 #endif

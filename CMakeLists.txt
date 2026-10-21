@@ -7,38 +7,39 @@
 # The platform is chosen from the target system: Windows uses the Win32 GUI
 # backend and the Windows file layer, everything else uses Xlib and POSIX.
 #
-# On Linux only the runtime libraries are needed (libX11.so.6 and
-# libsodium.so.23); their declarations live in src/deps/, so no -dev packages
-# are required. On Windows the Win32 API comes with MinGW-w64 and libsodium is
+# The code is C++20, built without exceptions or RTTI. On Linux only the
+# runtime libraries are needed (libX11.so.6 and libsodium.so.23); their
+# declarations live in src/deps/, so no -dev packages are required. On Windows the Win32 API comes with MinGW-w64 and libsodium is
 # linked through its import library (libsodium.dll.a).
 
 cmake_minimum_required(VERSION 3.16)
-project(FileEncryptor LANGUAGES C)
+project(FileEncryptor LANGUAGES CXX)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 # compile_commands.json lets clangd find the include path and flags.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ---------------- Platform ----------------
 
 if(WIN32)
-  set(OS_SRC  src/core/fs_win32.c src/core/net_win32.c src/core/http_winhttp.c)
-  set(GUI_SRC src/ui/platform_win32.c)
-  set(TTY_SRC src/cli/tty_win32.c)
+  set(OS_SRC  src/core/fs_win32.cpp src/core/net_win32.cpp src/core/http_winhttp.cpp)
+  set(GUI_SRC src/ui/platform_win32.cpp)
+  set(TTY_SRC src/cli/tty_win32.cpp)
   find_library(SODIUM_LIB NAMES sodium libsodium REQUIRED)
   set(SYSTEM_LIBS ws2_32 winhttp)
   set(GUI_LIBS gdi32 user32)
-  set(PLATFORM_DEFS __USE_MINGW_ANSI_STDIO=1)
+  # NOMINMAX keeps <windows.h> from defining min() and max() macros.
+  set(PLATFORM_DEFS __USE_MINGW_ANSI_STDIO=1 NOMINMAX WIN32_LEAN_AND_MEAN)
 else()
-  set(OS_SRC  src/core/fs_posix.c src/core/net_posix.c src/core/http_curl.c)
-  set(GUI_SRC src/ui/platform_x11.c)
-  set(TTY_SRC src/cli/tty_posix.c)
+  set(OS_SRC  src/core/fs_posix.cpp src/core/net_posix.cpp src/core/http_curl.cpp)
+  set(GUI_SRC src/ui/platform_x11.cpp)
+  set(TTY_SRC src/cli/tty_posix.cpp)
   # Link the runtime libraries by their exact file names.
   find_library(SODIUM_LIB NAMES libsodium.so.23 sodium REQUIRED)
   find_library(X11_LIB NAMES libX11.so.6 X11 REQUIRED)
@@ -51,49 +52,56 @@ endif()
 # ---------------- Core (everything except the GUI) ----------------
 
 add_library(crls_core STATIC
-  src/core/append.c
-  src/core/archive.c
-  src/core/browser.c
-  src/core/httpmsg.c
-  src/core/remote.c
-  src/core/source.c
-  src/core/status.c
-  src/core/util.c
+  src/core/append.cpp
+  src/core/archive.cpp
+  src/core/browser.cpp
+  src/core/httpmsg.cpp
+  src/core/remote.cpp
+  src/core/source.cpp
+  src/core/status.cpp
+  src/core/util.cpp
   ${OS_SRC}
-  src/lib/vector.c
+  src/lib/vector.cpp
 )
 target_include_directories(crls_core PUBLIC src)
 target_compile_definitions(crls_core PUBLIC _DEFAULT_SOURCE ${PLATFORM_DEFS})
-target_compile_options(crls_core PUBLIC -Wall -Wextra -Wno-sign-compare)
+# Errors are reported with set_status() and return values, never with
+# exceptions; nothing needs run-time type information either.
+target_compile_options(crls_core PUBLIC -Wall -Wextra -Wno-sign-compare -fno-exceptions -fno-rtti)
+# Link the C++ runtime statically on MinGW, so the executables only need
+# libsodium-26.dll next to them.
+if(MINGW)
+  target_link_options(crls_core PUBLIC -static-libgcc -static-libstdc++)
+endif()
 target_link_libraries(crls_core PUBLIC ${SODIUM_LIB} ${SYSTEM_LIBS})
 
 # ---------------- Server ----------------
 
-add_library(crls_server STATIC src/server/server.c)
+add_library(crls_server STATIC src/server/server.cpp)
 target_link_libraries(crls_server PUBLIC crls_core)
 
 # ---------------- Command-line client ----------------
 
-add_library(crls_cli STATIC src/cli/cli.c ${TTY_SRC})
+add_library(crls_cli STATIC src/cli/cli.cpp ${TTY_SRC})
 target_link_libraries(crls_cli PUBLIC crls_core)
 
 # ---------------- Program ----------------
 
 set(UI_SRC
-  src/ui/actions.c
-  src/ui/draw.c
-  src/ui/input.c
-  src/ui/layout.c
+  src/ui/actions.cpp
+  src/ui/draw.cpp
+  src/ui/input.cpp
+  src/ui/layout.cpp
   ${GUI_SRC}
 )
 
-add_executable(file-encryptor WIN32 src/main.c ${UI_SRC})
+add_executable(file-encryptor WIN32 src/main.cpp ${UI_SRC})
 target_link_libraries(file-encryptor PRIVATE crls_server crls_cli ${GUI_LIBS})
 
 # The GUI executable has no console on Windows; this one runs the
 # command-line modes (--server, --upload) with one.
 if(WIN32)
-  add_executable(file-encryptor-cli src/main.c ${UI_SRC})
+  add_executable(file-encryptor-cli src/main.cpp ${UI_SRC})
   target_compile_definitions(file-encryptor-cli PRIVATE CRLS_CONSOLE)
   target_link_libraries(file-encryptor-cli PRIVATE crls_server crls_cli ${GUI_LIBS})
 endif()
@@ -102,35 +110,35 @@ endif()
 
 enable_testing()
 
-add_library(test_util STATIC tests/test_util.c)
+add_library(test_util STATIC tests/test_util.cpp)
 target_link_libraries(test_util PUBLIC crls_core)
 
-add_executable(test-archive tests/test_archive.c)
+add_executable(test-archive tests/test_archive.cpp)
 target_link_libraries(test-archive PRIVATE test_util)
 add_test(NAME archive COMMAND test-archive ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
 
-add_executable(test-append tests/test_append.c)
+add_executable(test-append tests/test_append.cpp)
 target_link_libraries(test-append PRIVATE test_util)
 add_test(NAME append COMMAND test-append ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
 
-add_executable(test-httpmsg tests/test_httpmsg.c)
+add_executable(test-httpmsg tests/test_httpmsg.cpp)
 target_link_libraries(test-httpmsg PRIVATE test_util)
 add_test(NAME httpmsg COMMAND test-httpmsg)
 
 find_package(Threads REQUIRED)
-add_library(server_fixture STATIC tests/server_fixture.c)
+add_library(server_fixture STATIC tests/server_fixture.cpp)
 target_link_libraries(server_fixture PUBLIC test_util crls_server Threads::Threads)
 
-add_executable(test-server tests/test_server.c)
+add_executable(test-server tests/test_server.cpp)
 target_link_libraries(test-server PRIVATE server_fixture)
 add_test(NAME server COMMAND test-server ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
 
-add_executable(test-remote tests/test_remote.c)
+add_executable(test-remote tests/test_remote.cpp)
 target_link_libraries(test-remote PRIVATE server_fixture)
 add_test(NAME remote COMMAND test-remote)
 set_tests_properties(remote PROPERTIES SKIP_RETURN_CODE 77)
 
-add_executable(test-cli tests/test_cli.c)
+add_executable(test-cli tests/test_cli.cpp)
 target_link_libraries(test-cli PRIVATE server_fixture crls_cli)
 add_test(NAME cli COMMAND test-cli)
 set_tests_properties(cli PROPERTIES SKIP_RETURN_CODE 77)

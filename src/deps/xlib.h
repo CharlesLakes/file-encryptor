@@ -16,6 +16,9 @@
 #ifndef DEPS_XLIB_H
 #define DEPS_XLIB_H
 
+/* The library is written in C: its symbols are not mangled. */
+extern "C"{
+
 typedef struct _XDisplay Display;
 typedef struct _XGC *GC;
 typedef unsigned long XID;
@@ -177,5 +180,7 @@ int          XFreeFont(Display *dpy, XFontStruct *font);
 int          XTextWidth(XFontStruct *font, const char *s, int len);
 int          XLookupString(XKeyEvent *event, char *buffer, int size, KeySym *keysym, void *status);
 int          XFlush(Display *dpy);
+
+}
 
 #endif

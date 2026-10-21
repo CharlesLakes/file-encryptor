@@ -1,6 +1,6 @@
 # FileEncryptor
 
-A small desktop app, written in C, that keeps files inside an encrypted,
+A small desktop app, written in C++, that keeps files inside an encrypted,
 password-protected archive with the `.crls` extension. Archives can also be
 published over HTTP(S) and read, or added to, from anywhere that knows the
 password.
@@ -20,7 +20,7 @@ password.
 
 ### Linux
 
-Requirements: `gcc`, `cmake` (3.16 or newer), `libX11.so.6` and
+Requirements: `g++` (13 or newer), `cmake` (3.16 or newer), `libX11.so.6` and
 `libsodium.so.23`. Both libraries come with most Linux desktops (on
 Debian/Ubuntu they are the packages `libx11-6` and `libsodium23`). Opening
 archives by URL also needs `libcurl.so.4` (`libcurl4`), which is loaded only
@@ -132,56 +132,56 @@ CMakeLists.txt        build: core library, server, CLI, program and tests
 cmake/
   mingw-w64.cmake     toolchain file to cross-compile for Windows
 src/
-  main.c              entry point: GUI, or --server / --upload
+  main.cpp            entry point: GUI, or --server / --upload
   core/               program logic, no UI code
-    archive.h/.c      the .crls format: open, create, add, extract, delete, compact
-    source.h/.c       where archive bytes are read from (a local file or a URL)
-    append.h/.c       signed uploads: built by the client, checked by the server
-    remote.h/.c       archives at http(s) URLs: Range reads with a cache, uploads
-    browser.h/.c      list of one folder's contents (filtered and sorted)
-    httpmsg.h/.c      strict HTTP/1.1 parsing (requests, ranges, hex)
-    status.h/.c       the status line message (set_status)
-    util.h/.c         little-endian ints, sizes, paths
+    archive.h/.cpp    the .crls format: open, create, add, extract, delete, compact
+    source.h/.cpp     where archive bytes are read from (a local file or a URL)
+    append.h/.cpp     signed uploads: built by the client, checked by the server
+    remote.h/.cpp     archives at http(s) URLs: Range reads with a cache, uploads
+    browser.h/.cpp    list of one folder's contents (filtered and sorted)
+    httpmsg.h/.cpp    strict HTTP/1.1 parsing (requests, ranges, hex)
+    status.h/.cpp     the status line message (set_status)
+    util.h/.cpp       little-endian ints, sizes, paths
     fs.h              files and paths: everything that differs between systems
-    fs_posix.c        ... for Linux (pread, flock, realpath, rename)
-    fs_win32.c        ... for Windows (ReadFile, LockFileEx, MoveFileEx)
+    fs_posix.cpp      ... for Linux (pread, flock, realpath, rename)
+    fs_win32.cpp      ... for Windows (ReadFile, LockFileEx, MoveFileEx)
     net.h             TCP sockets
-    net_posix.c       ... BSD sockets
-    net_win32.c       ... Winsock
+    net_posix.cpp     ... BSD sockets
+    net_win32.cpp     ... Winsock
     http.h            HTTP(S) requests
-    http_curl.c       ... libcurl, loaded with dlopen()
-    http_winhttp.c    ... WinHTTP
+    http_curl.cpp     ... libcurl, loaded with dlopen()
+    http_winhttp.cpp  ... WinHTTP
   server/
-    server.h/.c       the --server mode
+    server.h/.cpp     the --server mode
   cli/
-    cli.h/.c          the --upload mode
+    cli.h/.cpp        the --upload mode
     tty.h             password prompt without echo
-    tty_posix.c       ... termios
-    tty_win32.c       ... console mode
+    tty_posix.cpp     ... termios
+    tty_win32.cpp     ... console mode
   ui/                 GUI
     ui.h              shared state (app), constants, all UI prototypes
     platform.h        window, events, drawing and fonts, independent of the OS
-    platform_x11.c    ... implemented with Xlib
-    platform_win32.c  ... implemented with Win32/GDI
-    layout.c          app state, list geometry, which buttons each screen has
-    draw.c            painting of each screen
-    actions.c         what each button / Enter does
-    input.c           mouse and keyboard to actions
+    platform_x11.cpp  ... implemented with Xlib
+    platform_win32.cpp ... implemented with Win32/GDI
+    layout.cpp        app state, list geometry, which buttons each screen has
+    draw.cpp          painting of each screen
+    actions.cpp       what each button / Enter does
+    input.cpp         mouse and keyboard to actions
   deps/               hand-written declarations of external libraries
-    xlib.h            used only by platform_x11.c
+    xlib.h            used only by platform_x11.cpp
     sodium.h
-    curl.h            used only by http_curl.c
+    curl.h            used only by http_curl.cpp
   lib/
-    vector.h/.c       generic dynamic array (copied from EDDs-in-C)
+    vector.h/.cpp     generic dynamic array (copied from EDDs-in-C)
 tests/
-  test_util.h/.c      CHECK(), temporary folders, files with known contents
-  server_fixture.h/.c runs the server in a thread for the tests
-  test_archive.c      the .crls format, versions 2 and 3
-  test_append.c       signed uploads without a network
-  test_httpmsg.c      the HTTP parser, including malformed requests
-  test_server.c       the server over real sockets
-  test_remote.c       URL reading and uploading against the server (needs libcurl)
-  test_cli.c          --upload (needs libcurl)
+  test_util.h/.cpp    CHECK(), temporary folders, files with known contents
+  server_fixture.h/.cpp runs the server in a thread for the tests
+  test_archive.cpp    the .crls format, versions 2 and 3
+  test_append.cpp     signed uploads without a network
+  test_httpmsg.cpp    the HTTP parser, including malformed requests
+  test_server.cpp     the server over real sockets
+  test_remote.cpp     URL reading and uploading against the server (needs libcurl)
+  test_cli.cpp        --upload (needs libcurl)
   fixtures/v2.crls    archive written by the version 2 format (compatibility test)
 ```
 
@@ -189,8 +189,8 @@ Dependencies only go downward: `main → ui / server / cli → core → lib/deps
 Nothing in `core/` includes `ui/`, `server/` or `cli/`, so the core can be tested
 without a display.
 
-CMake picks the `*_posix.c` / `*_x11.c` / `http_curl.c` files or the
-`*_win32.c` / `http_winhttp.c` files from the target system (`WIN32` or not).
+CMake picks the `*_posix.cpp` / `*_x11.cpp` / `http_curl.cpp` files or the
+`*_win32.cpp` / `http_winhttp.cpp` files from the target system (`WIN32` or not).
 No other file contains operating system specific code, except for a few
 `#ifdef _WIN32` lines in the tests.
 
@@ -199,10 +199,10 @@ No other file contains operating system specific code, except for a few
 ### One event, start to finish
 
 ```
-platform event ──► input.c ──► actions.c ──► core/archive.c ──► set_status()
-  (main.c)         (click/key)  (handle_action)  (does the work)     │
+platform event ──► input.cpp ──► actions.cpp ──► core/archive.cpp ──► set_status()
+  (main.cpp)         (click/key)  (handle_action)  (does the work)     │
                                                                      ▼
-                                            draw.c repaints the whole window
+                                            draw.cpp repaints the whole window
 ```
 
 All UI state lives in a single global `app` (`app_state` in `ui/ui.h`). The
@@ -256,24 +256,26 @@ the new state and tries again.
 
 ## Contributing (humans and LLMs)
 
-- **Where things go:** format or crypto changes go in `core/archive.c`; the
-  upload protocol in `core/append.c` (both sides) and `server/server.c`. A new
+- **Where things go:** format or crypto changes go in `core/archive.cpp`; the
+  upload protocol in `core/append.cpp` (both sides) and `server/server.cpp`. A new
   button means an `ACT_*` in `ui/ui.h`, an entry in `get_buttons()`
-  (`layout.c`) and a `case` in `handle_action()` (`actions.c`). Painting goes
-  in `draw.c`.
+  (`layout.cpp`) and a `case` in `handle_action()` (`actions.cpp`). Painting goes
+  in `draw.cpp`.
 - **Using a new libsodium, Xlib or libcurl function:** declare it in
   `src/deps/` with the exact signature from the real header. libcurl options
-  must go through the typed wrappers in `http_curl.c`.
+  must go through the typed wrappers in `http_curl.cpp`.
 - **Operating system specific code:** files and paths go in `core/fs.h`,
   sockets in `core/net.h`, HTTP clients in `core/http.h`, password prompts in
   `cli/tty.h` and windowing in `ui/platform.h`, each with one implementation
   per system. Always add `O_BINARY` to `open()` flags, and use `fs_basename()`
   / `fs_is_separator()` / `fs_is_absolute()` instead of looking for `'/'`.
 - **Network input is hostile:** anything read from a socket or an HTTP
-  response goes through the strict parsers in `core/httpmsg.c`, and every
-  length is checked before it is used. Add a case to `tests/test_httpmsg.c`
+  response goes through the strict parsers in `core/httpmsg.cpp`, and every
+  length is checked before it is used. Add a case to `tests/test_httpmsg.cpp`
   when you accept something new.
-- **Style:** C11, two-space indentation, `snake_case`, `static` for anything
+- **Style:** C++20 built with `-fno-exceptions -fno-rtti`: functions report
+  errors by returning `false` (or an error value) after `set_status()`, never by
+  throwing. Two-space indentation, `snake_case`, `static` for anything
   private to a file. Every file starts with a Doxygen block (`@file`, `@brief`,
   `@author`, `Maintainer:`) and public functions are documented in their
   header with `@brief`, `@param` and `@return`, following `src/lib/vector.h`.
@@ -285,7 +287,7 @@ the new state and tries again.
   the `src/` include path and flags.
 - **Before committing:** `cmake --build build && ctest --test-dir build` must
   finish with no warnings and no failed tests. If you change the format, add a
-  test in `tests/test_archive.c`; never regenerate `tests/fixtures/v2.crls`.
+  test in `tests/test_archive.cpp`; never regenerate `tests/fixtures/v2.crls`.
 - **Commit messages:** follow
   [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):
   `<type>[optional scope]: <description>`, e.g. `feat(ui): add Windows backend`
