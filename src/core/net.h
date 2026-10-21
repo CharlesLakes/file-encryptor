@@ -28,7 +28,7 @@ namespace crls{
 /** @brief A socket: a descriptor on POSIX, a SOCKET on Windows. */
 typedef intptr_t net_socket;
 
-#define NET_INVALID ((net_socket) -1)   /**< Value of an invalid socket. */
+inline constexpr net_socket NET_INVALID = -1;   /**< Value of an invalid socket. */
 
 /**
  * @brief Closes a socket. Safe on NET_INVALID.

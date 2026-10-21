@@ -22,7 +22,7 @@
 using namespace crls;
 
 #define PASSWORD "upload-password"
-#define MAX_BODY (64ULL << 20)
+inline constexpr uint64_t MAX_BODY = 64ULL << 20;
 
 /**
  * @brief  Runs the server side of an append on the archive at crls.

@@ -24,7 +24,8 @@
 
 namespace crls{
 
-#define MAX_UPLOAD_ATTEMPTS 5
+/** @brief Uploads retried on top of newer states before giving up. */
+inline constexpr int MAX_UPLOAD_ATTEMPTS = 5;
 
 /**
  * @brief byte_source over HTTP Range requests, with a cache of one block.

@@ -22,7 +22,7 @@
 using namespace crls;
 
 #define PASSWORD "cli-password"
-#define SKIP 77
+inline constexpr int SKIP = 77;   /**< Exit code that CTest reports as skipped. */
 
 /**
  * @brief  Runs cli_upload() with the given password on standard input.

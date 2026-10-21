@@ -13,7 +13,8 @@
 
 namespace crls{
 
-#define DOUBLE_CLICK_MS 400   /**< Maximum interval between the clicks of a double click. */
+/** @brief Maximum interval between the clicks of a double click, in milliseconds. */
+inline constexpr unsigned long DOUBLE_CLICK_MS = 400;
 
 /**
  * @brief  Checks whether a point lies inside a rectangle.

@@ -23,7 +23,7 @@
 using namespace crls;
 
 #define PASSWORD "remote-password"
-#define SKIP 77
+inline constexpr int SKIP = 77;   /**< Exit code that CTest reports as skipped. */
 
 /**
  * @brief  Returns the size of a local file.

@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <string>
+#include <vector>
 #include <unistd.h>
 #include "core/append.h"
 #include "core/archive.h"
@@ -31,12 +32,11 @@ using namespace crls;
 static int port;
 
 /** @brief A response read by request(). */
-typedef struct{
-  int status;                          /**< Status code, or 0 if none was received. */
-  char head[4096];                     /**< Status line and headers. */
-  unsigned char *body;                 /**< Body (free with free()). */
-  size_t body_len;                     /**< Length of body. */
-}response;
+struct response{
+  int status = 0;                      /**< Status code, or 0 if none was received. */
+  std::string head;                    /**< Status line and headers. */
+  std::string body;                    /**< Body. */
+};
 
 /**
  * @brief  Sends a raw request and reads the whole response.
@@ -47,51 +47,28 @@ typedef struct{
  * @return True if a response with a status line was received.
  */
 static bool request(const char *head, const void *body, size_t body_len, response *r){
-  memset(r, 0, sizeof(*r));
+  *r = response();
   unique_socket s = net_connect("127.0.0.1", port);
   if(!s) return false;
   net_set_timeout(s.get(), 10);
   bool ok = net_send_all(s.get(), head, strlen(head)) && (!body || net_send_all(s.get(), body, body_len));
 
-  size_t cap = 1 << 16, len = 0;
-  unsigned char *buf = (unsigned char *) malloc(cap);
+  std::string received;
+  char chunk[1 << 16];
   long n;
-  while(ok && (n = net_recv(s.get(), buf + len, cap - len)) > 0){
-    len += (size_t) n;
-    if(len == cap) buf = (unsigned char *) realloc(buf, cap *= 2);
-  }
+  while(ok && (n = net_recv(s.get(), chunk, sizeof(chunk))) > 0) received.append(chunk, static_cast<size_t>(n));
   s = unique_socket();
 
-  unsigned char *end = NULL;
-  for(size_t i = 0; i + 3 < len; i++)
-    if(memcmp(buf + i, "\r\n\r\n", 4) == 0){
-      end = buf + i + 4;
-      break;
-    }
+  size_t end = received.find("\r\n\r\n");
   /* Skip an interim 100 Continue response. */
-  if(end && len > 12 && memcmp(buf + 9, "100", 3) == 0){
-    size_t skip = (size_t) (end - buf);
-    memmove(buf, end, len - skip);
-    len -= skip;
-    end = NULL;
-    for(size_t i = 0; i + 3 < len; i++)
-      if(memcmp(buf + i, "\r\n\r\n", 4) == 0){
-        end = buf + i + 4;
-        break;
-      }
+  if(end != std::string::npos && received.compare(9, 3, "100") == 0){
+    received.erase(0, end + 4);
+    end = received.find("\r\n\r\n");
   }
-  if(!end || len < 12){
-    free(buf);
-    return false;
-  }
-  size_t head_len = (size_t) (end - buf);
-  memcpy(r->head, buf, head_len < sizeof(r->head) - 1 ? head_len : sizeof(r->head) - 1);
-  r->status = atoi((const char *) buf + 9);
-  r->body_len = len - head_len;
-  r->body = (unsigned char *) malloc(r->body_len + 1);
-  memcpy(r->body, end, r->body_len);
-  r->body[r->body_len] = 0;
-  free(buf);
+  if(end == std::string::npos || received.size() < 12) return false;
+  r->head = received.substr(0, end + 4);
+  r->body = received.substr(end + 4);
+  r->status = atoi(received.c_str() + 9);
   return true;
 }
 
@@ -136,12 +113,10 @@ static void post_head(const char *target, const append_upload *up, char *out){
 static int post(const char *target, const append_upload *up, uint64_t send){
   char head[1024];
   post_head(target, up, head);
-  unsigned char *body = (unsigned char *) malloc((size_t) up->claim.content_length + 1);
-  read_at(up->body_fd(), body, (size_t) up->claim.content_length, 0);
+  std::vector<unsigned char> body(static_cast<size_t>(up->claim.content_length));
+  read_at(up->body_fd(), body.data(), body.size(), 0);
   response r;
-  bool ok = request(head, body, (size_t) send, &r);
-  free(body);
-  free(r.body);
+  bool ok = request(head, body.data(), static_cast<size_t>(send), &r);
   return ok ? r.status : 0;
 }
 
@@ -198,47 +173,34 @@ int main(int argc, char **argv){
   response r;
   /* Listing: archives only. */
   CHECK(get("GET", "/", "", &r) == 200);
-  CHECK(strcmp((char *) r.body, "old.crls\nremote.crls\n") == 0);
-  free(r.body);
+  CHECK_EQ(r.body, "old.crls\nremote.crls\n");
 
   /* Whole file, a range, and HEAD. */
   int fd = open(crls, O_RDONLY | O_BINARY);
   uint64_t size = file_size(fd);
-  unsigned char *expected = (unsigned char *) malloc((size_t) size);
-  CHECK(read_at(fd, expected, (size_t) size, 0));
+  std::vector<unsigned char> expected(static_cast<size_t>(size));
+  CHECK(read_at(fd, expected.data(), expected.size(), 0));
   close(fd);
   CHECK(get("GET", "/remote.crls", "", &r) == 200);
-  CHECK(r.body_len == size && memcmp(r.body, expected, (size_t) size) == 0);
-  free(r.body);
+  CHECK(r.body.size() == size && memcmp(r.body.data(), expected.data(), expected.size()) == 0);
   CHECK(get("GET", "/remote.crls", "Range: bytes=10-99\r\n", &r) == 206);
-  CHECK(r.body_len == 90 && memcmp(r.body, expected + 10, 90) == 0);
-  CHECK(strstr(r.head, "Content-Range: bytes 10-99/") != NULL);
+  CHECK(r.body.size() == 90 && memcmp(r.body.data(), expected.data() + 10, 90) == 0);
+  CHECK(strstr(r.head.c_str(), "Content-Range: bytes 10-99/") != NULL);
   char etag[128] = "";
-  const char *e = strstr(r.head, "ETag: ");
+  const char *e = strstr(r.head.c_str(), "ETag: ");
   if(e) sscanf(e + 6, "%127[^\r]", etag);
   CHECK(etag[0] == '"');
-  free(r.body);
-  CHECK(get("HEAD", "/remote.crls", "", &r) == 200 && r.body_len == 0);
-  free(r.body);
-  free(expected);
+  CHECK(get("HEAD", "/remote.crls", "", &r) == 200 && r.body.size() == 0);
 
   /* Errors. */
   CHECK(get("GET", "/remote.crls", "Range: bytes=0-1,5-6\r\n", &r) == 416);
-  free(r.body);
   CHECK(get("GET", "/remote.crls", "If-Match: \"other\"\r\n", &r) == 412);
-  free(r.body);
   CHECK(get("GET", "/notes.txt", "", &r) == 404);
-  free(r.body);
   CHECK(get("GET", "/../served/remote.crls", "", &r) == 404);
-  free(r.body);
   CHECK(get("GET", "/%2e%2e%2fserved%2fremote.crls", "", &r) == 404);
-  free(r.body);
   CHECK(get("DELETE", "/remote.crls", "", &r) == 405);
-  free(r.body);
   CHECK(request("POST /remote.crls HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n", NULL, 0, &r) && r.status == 501);
-  free(r.body);
   CHECK(request("POST /remote.crls HTTP/1.1\r\nHost: test\r\n\r\n", NULL, 0, &r) && r.status == 411);
-  free(r.body);
 
   /* A valid upload. Its body is only the new entry and the new index. */
   append_upload up;
@@ -262,7 +224,6 @@ int main(int argc, char **argv){
   post("/remote.crls", &up, up.claim.content_length / 2);
   /* The server may still be finishing that connection; this request waits for it. */
   CHECK(get("HEAD", "/", "", &r) == 200);
-  free(r.body);
   fd = open(crls, O_RDONLY | O_BINARY);
   CHECK_EQ(file_size(fd), size);
   close(fd);

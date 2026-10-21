@@ -55,37 +55,37 @@ namespace crls{
  * to fill the space in between.
  */
 
-#define MIN_WIDTH      760   /**< Initial and minimum client width. */
-#define MIN_HEIGHT     560   /**< Initial and minimum client height. */
-#define MARGIN         16
-#define ROW_H          22
-#define BUTTONS_BOTTOM 90    /**< Distance from the button row to the bottom edge. */
-#define BUTTON_H       34
-#define STATUS_BOTTOM  24    /**< Distance from the status baseline to the bottom edge. */
-#define FIELDS_ABOVE   118   /**< Distance from the first field to the button row. */
-#define FIELD_STEP     36    /**< Vertical distance between fields. */
-#define FIELD_X        190
-#define FIELD_H        28
-#define MAX_BUTTONS    6
+inline constexpr int MIN_WIDTH      = 760;   /**< Initial and minimum client width. */
+inline constexpr int MIN_HEIGHT     = 560;   /**< Initial and minimum client height. */
+inline constexpr int MARGIN         = 16;
+inline constexpr int ROW_H          = 22;
+inline constexpr int BUTTONS_BOTTOM = 90;   /**< Distance from the button row to the bottom edge. */
+inline constexpr int BUTTON_H       = 34;
+inline constexpr int STATUS_BOTTOM  = 24;   /**< Distance from the status baseline to the bottom edge. */
+inline constexpr int FIELDS_ABOVE   = 118;   /**< Distance from the first field to the button row. */
+inline constexpr int FIELD_STEP     = 36;   /**< Vertical distance between fields. */
+inline constexpr int FIELD_X        = 190;
+inline constexpr int FIELD_H        = 28;
+inline constexpr int MAX_BUTTONS    = 6;
 
 /* ---------------- Colors (0xRRGGBB) ---------------- */
 
-#define COLOR_BG        0x1e1e2e
-#define COLOR_PANEL     0x181825
-#define COLOR_ROW_ALT   0x1b1b2b
-#define COLOR_SELECTED  0x45475a
-#define COLOR_TEXT      0xcdd6f4
-#define COLOR_MUTED     0x7f849c
-#define COLOR_DIR       0x89b4fa
-#define COLOR_FILE      0xa6e3a1
-#define COLOR_ERROR     0xf38ba8
-#define COLOR_OK        0xa6e3a1
-#define COLOR_BUTTON    0x313244
-#define COLOR_PRIMARY   0x89b4fa
-#define COLOR_DANGER    0xf38ba8
-#define COLOR_DARK_TEXT 0x11111b
-#define COLOR_BORDER    0x45475a
-#define COLOR_FOCUS     0x89b4fa
+inline constexpr unsigned long COLOR_BG       = 0x1e1e2e;
+inline constexpr unsigned long COLOR_PANEL    = 0x181825;
+inline constexpr unsigned long COLOR_ROW_ALT  = 0x1b1b2b;
+inline constexpr unsigned long COLOR_SELECTED = 0x45475a;
+inline constexpr unsigned long COLOR_TEXT     = 0xcdd6f4;
+inline constexpr unsigned long COLOR_MUTED    = 0x7f849c;
+inline constexpr unsigned long COLOR_DIR      = 0x89b4fa;
+inline constexpr unsigned long COLOR_FILE     = 0xa6e3a1;
+inline constexpr unsigned long COLOR_ERROR    = 0xf38ba8;
+inline constexpr unsigned long COLOR_OK       = 0xa6e3a1;
+inline constexpr unsigned long COLOR_BUTTON   = 0x313244;
+inline constexpr unsigned long COLOR_PRIMARY  = 0x89b4fa;
+inline constexpr unsigned long COLOR_DANGER   = 0xf38ba8;
+inline constexpr unsigned long COLOR_DARK_TEXT = 0x11111b;
+inline constexpr unsigned long COLOR_BORDER   = 0x45475a;
+inline constexpr unsigned long COLOR_FOCUS    = 0x89b4fa;
 
 /* ---------------- State ---------------- */
 
@@ -105,17 +105,17 @@ inline constexpr int UI_FIELD_COUNT = 3;   /**< Number of ui_field values. */
 /**
  * @brief Button drawn on the current screen.
  */
-typedef struct{
+struct button{
   int x, y, w, h;                /**< Bounding rectangle. */
   const char *label;             /**< Displayed text. */
   ui_action action;              /**< Action triggered on click. */
   unsigned long color;           /**< Background color. */
-}button;
+};
 
 /**
  * @brief Application state shared by all UI modules.
  */
-typedef struct{
+struct app_state{
   ui_screen screen;              /**< Current screen. */
   archive arc;                   /**< Currently open archive, if any. */
   browser files;                 /**< Folder browser used by the browsing screens. */
@@ -131,7 +131,7 @@ typedef struct{
 
   unsigned long last_click_time; /**< Time of the last click, for double-click detection. */
   int last_click_index;          /**< Row of the last click, for double-click detection. */
-}app_state;
+};
 
 
 /* ---------------- layout.cpp ---------------- */

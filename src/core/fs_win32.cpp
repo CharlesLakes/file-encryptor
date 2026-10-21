@@ -28,7 +28,7 @@
 namespace crls{
 
 /** @brief Largest transfer passed to a single ReadFile() or WriteFile() call. */
-#define MAX_TRANSFER (1u << 30)
+inline constexpr DWORD MAX_TRANSFER = 1u << 30;
 
 /**
  * @brief  Returns the Windows handle behind a C runtime descriptor.
