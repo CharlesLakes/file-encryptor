@@ -113,9 +113,8 @@ int main(){
   CHECK(http_parse_request(big, req) == http_parse::too_large);
 
   for(size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++){
-    std::string out;
-    bool ok = http_decode_path(paths[i].target, out);
-    if(ok != (paths[i].expected != NULL) || (ok && out != paths[i].expected)){
+    std::optional<std::string> out = http_decode_path(paths[i].target);
+    if(out.has_value() != (paths[i].expected != NULL) || (out && *out != paths[i].expected)){
       printf("FAIL path %s\n", paths[i].target);
       failures++;
     }

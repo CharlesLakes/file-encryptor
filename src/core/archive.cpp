@@ -470,7 +470,6 @@ bool archive::create(const std::string &path, const char *password){
 
 bool archive::create(const std::string &path, const char *password, uint64_t ops, uint64_t mem){
   close();
-  status_error = false;
   unique_fd fd(::open(path.c_str(), O_RDWR | O_CREAT | O_EXCL | O_BINARY, 0600));
   if(!fd){
     set_status(true, "Could not create %s: %s", path.c_str(), strerror(errno));
@@ -496,8 +495,10 @@ bool archive::create(const std::string &path, const char *password, uint64_t ops
   }
 
   std::ranges::copy(head.first(ad_len_), header_ad_.begin());
-  if(!write_at(fd.get(), head.first(header_bytes_), 0) || !write_index(fd.get())){
-    if(!status_error) set_status(true, "Could not write %s: %s", path.c_str(), strerror(errno));
+  bool header_written = write_at(fd.get(), head.first(header_bytes_), 0);
+  if(!header_written) set_status(true, "Could not write %s: %s", path.c_str(), strerror(errno));
+  /* write_index() explains its own failures. */
+  if(!header_written || !write_index(fd.get())){
     key_.wipe();
     sign_sk_.wipe();
     fd.reset();
@@ -633,7 +634,6 @@ bool archive::remove(std::size_t index){
 /* ---------------- Compaction ---------------- */
 
 bool archive::compact(){
-  status_error = false;
   std::string tmp_path = path_ + ".tmp";
   unique_fd fd(::open(tmp_path.c_str(), O_RDWR | O_CREAT | O_TRUNC | O_BINARY, 0600));
   if(!fd){
@@ -672,6 +672,7 @@ bool archive::compact(){
     std::ranges::copy(head.first(ad_len_), header_ad_.begin());
   }
   bool ok = write_at(fd.get(), head.first(header_bytes_), 0);
+  bool reported = false;   /* True once a failure has set its own status. */
 
   uint64_t position = header_bytes_;
   for(std::size_t i = 0; ok && i < entries_.size(); i++){
@@ -695,7 +696,10 @@ bool archive::compact(){
       sodium_memzero(&push_state, sizeof(push_state));
       ok = result == pull_result::ok && written - position == e.stored;
       if(ok) e.stream_header = stream_header;
-      else if(result != pull_result::ok) report_pull_error(e, result, tmp_path, remote_, path_);
+      else if(result != pull_result::ok){
+        report_pull_error(e, result, tmp_path, remote_, path_);
+        reported = true;
+      }
     }else{
       for(uint64_t copied = 0; ok && copied < e.stored; ){
         std::span<unsigned char> chunk =
@@ -708,7 +712,11 @@ bool archive::compact(){
     position += e.stored;
   }
 
-  ok = ok && write_index(fd.get()) && fs_replace_file(tmp_path, fd, path_, fd_);
+  if(ok && !write_index(fd.get())){
+    ok = false;
+    reported = true;
+  }
+  ok = ok && fs_replace_file(tmp_path, fd, path_, fd_);
 
   if(!ok){
     restore();
@@ -721,7 +729,7 @@ bool archive::compact(){
     }
     /* On Windows the descriptor may have been reopened. */
     src_ = std::make_unique<fd_source>(fd_.get());
-    if(!status_error) set_status(true, "Could not compact: %s", strerror(errno));
+    if(!reported) set_status(true, "Could not compact: %s", strerror(errno));
     return false;
   }
 

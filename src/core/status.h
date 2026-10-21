@@ -10,17 +10,16 @@
  * Any module may report success or failure by calling set_status(). Functions
  * that return false always set an error status beforehand, so callers only
  * need to check the return value.
+ *
+ * The message lives in a fixed buffer on purpose: set_status() is often called
+ * right after something failed, possibly an allocation, so it must not
+ * allocate memory itself. Longer messages are truncated.
  */
 
 #ifndef CORE_STATUS_H
 #define CORE_STATUS_H
 
-#include <stdbool.h>
-
 namespace crls{
-
-extern char status_text[640];   /**< Current status message. */
-extern bool status_error;       /**< True if the current message is an error. */
 
 /**
  * @brief Lets the compiler check the arguments of a printf-style function
@@ -44,7 +43,17 @@ void set_status(bool error, const char *format, ...) CRLS_PRINTF(2, 3);
 /**
  * @brief Clears the status message.
  */
-void clear_status(void);
+void clear_status();
+
+/**
+ * @brief  Returns the current status message.
+ * @return NUL-terminated text, empty if there is none. It stays valid until
+ *         the next set_status() or clear_status().
+ */
+const char* status_message() noexcept;
+
+/** @brief True if the current status message is an error. */
+bool status_is_error() noexcept;
 
 }
 

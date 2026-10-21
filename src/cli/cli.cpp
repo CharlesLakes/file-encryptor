@@ -32,7 +32,7 @@ int cli_upload(std::span<char *const> args){
       return 2;
     }
     if(!remote_open(a, args[1], password.data())){
-      fprintf(stderr, "%s\n", status_text);
+      fprintf(stderr, "%s\n", status_message());
       return 1;
     }
   }
@@ -40,7 +40,7 @@ int cli_upload(std::span<char *const> args){
   int failed = 0;
   for(char *path : args.subspan(2)){
     bool ok = remote_add_file(a, path);
-    fprintf(stderr, "%s: %s\n", path, status_text);
+    fprintf(stderr, "%s: %s\n", path, status_message());
     if(!ok) failed++;
   }
   return failed ? 1 : 0;

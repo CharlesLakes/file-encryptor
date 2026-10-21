@@ -8,25 +8,38 @@
 
 #include "core/status.h"
 
-#include <stdarg.h>
-#include <stdio.h>
+#include <array>
+#include <cstdarg>
+#include <cstdio>
 
 namespace crls{
 
-char status_text[640] = "";
-bool status_error = false;
+namespace{
+
+std::array<char, 640> status_text{};   /* Current status message. */
+bool status_error = false;             /* True if it is an error. */
+
+}
 
 void set_status(bool error, const char *format, ...){
   va_list args;
   va_start(args, format);
-  vsnprintf(status_text, sizeof(status_text), format, args);
+  vsnprintf(status_text.data(), status_text.size(), format, args);
   va_end(args);
   status_error = error;
 }
 
-void clear_status(void){
+void clear_status(){
   status_text[0] = '\0';
   status_error = false;
+}
+
+const char* status_message() noexcept{
+  return status_text.data();
+}
+
+bool status_is_error() noexcept{
+  return status_error;
 }
 
 }

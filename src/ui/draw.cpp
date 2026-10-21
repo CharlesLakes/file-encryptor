@@ -245,8 +245,8 @@ void draw(app_state &app){
   else draw_pick_screen(app);
 
   draw_buttons(app);
-  draw_text_fit(ui_font::regular, MARGIN, status_y(), platform_width() - 2*MARGIN, status_text, false,
-                status_error ? COLOR_ERROR : COLOR_OK);
+  draw_text_fit(ui_font::regular, MARGIN, status_y(), platform_width() - 2*MARGIN, status_message(), false,
+                status_is_error() ? COLOR_ERROR : COLOR_OK);
 
   platform_present();
 }

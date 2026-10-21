@@ -71,8 +71,8 @@ int main(){
   /* The wrong password opens nothing and uploads nothing. */
   char *args[] = {upload, url, one, two};
   int code = run_upload("not-the-password", args);
-  if(strstr(status_text, "libcurl") != NULL){
-    printf("SKIP: %s\n", status_text);
+  if(strstr(status_message(), "libcurl") != NULL){
+    printf("SKIP: %s\n", status_message());
     return SKIP;
   }
   CHECK_EQ(code, 1);

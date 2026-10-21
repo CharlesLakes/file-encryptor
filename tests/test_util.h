@@ -25,7 +25,7 @@ extern char test_dir[PATH_MAX];/**< Temporary folder of the running test. */
 
 /** @brief Records a failure, with the current status message, if cond is false. */
 #define CHECK(cond) do{ \
-    if(!(cond)){ printf("FAIL %s:%d: %s (status: %s)\n", __FILE__, __LINE__, #cond, crls::status_text); failures++; } \
+    if(!(cond)){ printf("FAIL %s:%d: %s (status: %s)\n", __FILE__, __LINE__, #cond, crls::status_message()); failures++; } \
   }while(0)
 
 /** @brief Records a failure that shows both values if a is not equal to b. */
@@ -57,7 +57,7 @@ void check_eq(const A &a, const B &b, const char *a_text, const char *b_text,
     equal = a == b;
   if(equal) return;
   printf("FAIL %s:%u: %s == %s (%s vs %s; status: %s)\n", where.file_name(), static_cast<unsigned>(where.line()),
-         a_text, b_text, describe(a).c_str(), describe(b).c_str(), crls::status_text);
+         a_text, b_text, describe(a).c_str(), describe(b).c_str(), crls::status_message());
   failures++;
 }
 

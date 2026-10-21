@@ -8,6 +8,8 @@
 
 #include "core/httpmsg.h"
 
+#include <algorithm>
+#include <charconv>
 #include "core/util.h"
 
 namespace crls{
@@ -25,15 +27,16 @@ bool is_token_char(char c){
 }
 
 /**
- * @brief  Returns the value of a hexadecimal digit.
- * @param  c Character.
- * @return 0 to 15, or -1 if c is not a hexadecimal digit.
+ * @brief  Decodes two hexadecimal digits.
+ * @param  digits Exactly two characters.
+ * @return The byte, or std::nullopt if a character is not a hexadecimal digit.
  */
-int hex_value(char c){
-  if(c >= '0' && c <= '9') return c - '0';
-  if(c >= 'a' && c <= 'f') return c - 'a' + 10;
-  if(c >= 'A' && c <= 'F') return c - 'A' + 10;
-  return -1;
+std::optional<unsigned char> hex_byte(std::string_view digits){
+  unsigned value = 0;
+  auto [end, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), value, 16);
+  /* from_chars() accepts neither signs nor spaces, but a single digit would do. */
+  if(digits.size() != 2 || ec != std::errc() || end != digits.data() + 2) return std::nullopt;
+  return static_cast<unsigned char>(value);
 }
 
 /**
@@ -60,14 +63,12 @@ bool parse_request_line(std::string_view line, http_request &req){
 }
 
 std::optional<uint64_t> http_parse_u64(std::string_view s){
+  /* from_chars() rejects signs and spaces and reports overflow; the whole
+     string must be digits, and no more than 20 of them (UINT64_MAX has 20). */
   if(s.empty() || s.size() > 20) return std::nullopt;
   uint64_t v = 0;
-  for(char c : s){
-    if(c < '0' || c > '9') return std::nullopt;
-    uint64_t digit = static_cast<uint64_t>(c - '0');
-    if(v > (UINT64_MAX - digit) / 10) return std::nullopt;
-    v = v * 10 + digit;
-  }
+  auto [end, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
+  if(ec != std::errc() || end != s.data() + s.size()) return std::nullopt;
   return v;
 }
 
@@ -117,28 +118,27 @@ http_parse http_parse_request(std::string_view bytes, http_request &req){
 }
 
 std::optional<std::string_view> http_header_value(const http_request &req, std::string_view name){
-  for(std::size_t i = 0; i < req.header_count; i++)
-    if(equals_nocase(req.headers[i].name, name)) return req.headers[i].value;
-  return std::nullopt;
+  std::span<const http_header> headers = req.header_list();
+  auto it = std::ranges::find_if(headers, [&](const http_header &h){ return equals_nocase(h.name, name); });
+  if(it == headers.end()) return std::nullopt;
+  return it->value;
 }
 
-bool http_decode_path(std::string_view target, std::string &out){
-  out.clear();
-  if(target.empty() || target[0] != '/') return false;
+std::optional<std::string> http_decode_path(std::string_view target){
+  if(!target.starts_with('/')) return std::nullopt;
+  std::string out;
   for(std::size_t i = 1; i < target.size(); i++){
     char c = target[i];
-    if(c == '?' || c == '#') return false;
+    if(c == '?' || c == '#') return std::nullopt;
     if(c == '%'){
-      int hi = i + 1 < target.size() ? hex_value(target[i + 1]) : -1;
-      int lo = hi >= 0 && i + 2 < target.size() ? hex_value(target[i + 2]) : -1;
-      if(hi < 0 || lo < 0) return false;
-      c = static_cast<char>(hi * 16 + lo);
-      if(c == '\0') return false;
+      std::optional<unsigned char> byte = hex_byte(target.substr(i + 1, 2));
+      if(!byte || *byte == 0) return std::nullopt;
+      c = static_cast<char>(*byte);
       i += 2;
     }
     out += c;
   }
-  return true;
+  return out;
 }
 
 std::optional<http_range> http_parse_range(std::string_view value, uint64_t size){
@@ -178,7 +178,7 @@ std::optional<http_content_range> http_parse_content_range(std::string_view valu
 }
 
 std::string http_hex_encode(std::span<const unsigned char> data){
-  static const char digits[] = "0123456789abcdef";
+  static constexpr std::string_view digits = "0123456789abcdef";
   std::string out;
   out.reserve(2 * data.size());
   for(unsigned char b : data){
@@ -191,9 +191,9 @@ std::string http_hex_encode(std::span<const unsigned char> data){
 bool http_hex_decode(std::string_view hex, std::span<unsigned char> out){
   if(hex.size() != 2 * out.size()) return false;
   for(std::size_t i = 0; i < out.size(); i++){
-    int hi = hex_value(hex[2*i]), lo = hex_value(hex[2*i + 1]);
-    if(hi < 0 || lo < 0) return false;
-    out[i] = static_cast<unsigned char>(hi * 16 + lo);
+    std::optional<unsigned char> byte = hex_byte(hex.substr(2*i, 2));
+    if(!byte) return false;
+    out[i] = *byte;
   }
   return true;
 }

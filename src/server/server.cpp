@@ -352,8 +352,9 @@ static int handle_connection(const server_config &cfg, net_socket s, char *metho
   bool get = req.method == "GET", head_only = req.method == "HEAD", post = req.method == "POST";
   if(!get && !head_only && !post) return send_error(s, 405, "Allow: GET, HEAD, POST\r\n", false);
 
-  std::string name;
-  if(!http_decode_path(req.target, name)) return send_error(s, 400, "", head_only);
+  std::optional<std::string> decoded = http_decode_path(req.target);
+  if(!decoded) return send_error(s, 400, "", head_only);
+  const std::string &name = *decoded;
   if(name.empty()){
     if(post) return send_error(s, 405, "Allow: GET, HEAD\r\n", false);
     return serve_listing(cfg, s, head_only);

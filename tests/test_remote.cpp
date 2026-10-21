@@ -89,8 +89,8 @@ int main(){
   /* Without the password nothing is visible. */
   CHECK(!remote_open(a, url, "wrong-password"));
   CHECK(!a.is_open() && a.entries().size() == 0);
-  if(strstr(status_text, "libcurl") != NULL){
-    printf("SKIP: %s\n", status_text);
+  if(strstr(status_message(), "libcurl") != NULL){
+    printf("SKIP: %s\n", status_message());
     return SKIP;
   }
 
@@ -126,7 +126,7 @@ int main(){
   make_file("upload-d.bin", 5, 36);
   path_in(file, "upload-d.bin");
   CHECK(!remote_add_file(b, file));
-  CHECK(strstr(status_text, "password") != NULL);
+  CHECK(strstr(status_message(), "password") != NULL);
   b.close();
 
   /* Everything is there when the archive is opened again, remotely or locally. */
@@ -147,7 +147,7 @@ int main(){
   path_in(dir, "out3");
   CHECK_EQ(make_dir(dir), 0);
   CHECK(a.extract(0, dir) == extract_result::failed);
-  CHECK(strstr(status_text, "Open it again") != NULL);
+  CHECK(strstr(status_message(), "Open it again") != NULL);
   a.close();
   b.close();
 

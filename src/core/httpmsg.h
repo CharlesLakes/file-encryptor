@@ -61,8 +61,11 @@ struct http_header{
 struct http_request{
   std::string_view method;             /**< Method, e.g. "GET". */
   std::string_view target;             /**< Request target as sent, e.g. "/a%20b.crls". */
-  std::array<http_header, http_max_headers> headers{}; /**< Headers in order. */
+  std::array<http_header, http_max_headers> headers{}; /**< Storage of the headers, without allocations. */
   std::size_t header_count = 0;        /**< Number of headers. */
+
+  /** @brief The headers received, in order. */
+  std::span<const http_header> header_list() const noexcept{ return std::span(headers).first(header_count); }
   bool has_length = false;             /**< True if Content-Length was sent. */
   uint64_t content_length = 0;         /**< Value of Content-Length. */
   std::size_t head_length = 0;         /**< Bytes of the head, including the blank line. */
@@ -102,10 +105,9 @@ std::optional<std::string_view> http_header_value(const http_request &req, std::
  *         "name x.crls"). Queries, fragments, NUL bytes and malformed escapes
  *         are rejected.
  * @param  target Request target, starting with '/'.
- * @param  out    Output: the decoded path without the leading '/'.
- * @return True on success, false otherwise.
+ * @return The decoded path without the leading '/', or std::nullopt.
  */
-bool http_decode_path(std::string_view target, std::string &out);
+std::optional<std::string> http_decode_path(std::string_view target);
 
 /**
  * @brief  Parses a Range header against a resource of size bytes.
