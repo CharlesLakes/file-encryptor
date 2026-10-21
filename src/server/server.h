@@ -51,6 +51,8 @@
 
 #include <stdint.h>
 
+namespace crls{
+
 /**
  * @brief Settings of a server.
  */
@@ -79,5 +81,7 @@ int server_run(const server_config *cfg);
  * @return Process exit code.
  */
 int server_main(int argc, char **argv);
+
+}
 
 #endif

@@ -13,6 +13,8 @@
 #include <termios.h>
 #include <unistd.h>
 
+namespace crls{
+
 /**
  * @brief  Reads one line from f and removes its line ending.
  * @param  f        Stream.
@@ -45,4 +47,6 @@ bool tty_read_password(const char *prompt, char *out, size_t out_size){
   fputc('\n', stderr);
   fclose(tty);
   return ok;
+}
+
 }

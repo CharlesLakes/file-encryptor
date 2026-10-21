@@ -25,6 +25,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+namespace crls{
+
 #define HTTP_MAX_LINE    8192    /**< Longest accepted request or header line. */
 #define HTTP_MAX_HEADERS 64      /**< Most accepted headers per request. */
 #define HTTP_MAX_HEAD    16384   /**< Longest accepted request head (line and headers). */
@@ -152,5 +154,7 @@ bool http_hex_decode(const char *hex, unsigned char *out, size_t len);
  * @return Reason phrase.
  */
 const char* http_reason(int status);
+
+}
 
 #endif

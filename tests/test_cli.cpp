@@ -19,6 +19,8 @@
 #include "server_fixture.h"
 #include "test_util.h"
 
+using namespace crls;
+
 #define PASSWORD "cli-password"
 #define SKIP 77
 

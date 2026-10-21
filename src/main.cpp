@@ -26,6 +26,8 @@
 #include "server/server.h"
 #include "ui/ui.h"
 
+using namespace crls;
+
 /**
  * @brief Adapts the scroll of the current list to the new number of visible
  *        rows and repaints the window.

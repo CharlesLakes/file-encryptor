@@ -18,6 +18,8 @@
 #include "core/fs.h"
 #include "deps/curl.h"
 
+namespace crls{
+
 static curl_api api;
 static bool loaded = false, load_failed = false;
 
@@ -189,4 +191,6 @@ bool http_perform(const http_request_spec *req, http_response *resp){
   api.easy_cleanup(h);
   api.slist_free_all(headers);
   return code == CURLE_OK;
+}
+
 }

@@ -279,8 +279,9 @@ the new state and tries again.
   when you accept something new.
 - **Style:** C++20 built with `-fno-exceptions -fno-rtti`: functions report
   errors by returning `false` (or an error value) after `set_status()`, never by
-  throwing. Two-space indentation, `snake_case`, `static` for anything
-  private to a file. Every file starts with a Doxygen block (`@file`, `@brief`,
+  throwing. Everything lives in `namespace crls` (tests and `main.cpp` use
+  `using namespace crls;`). Two-space indentation, `snake_case`, `static` for
+  anything private to a file. Every file starts with a Doxygen block (`@file`, `@brief`,
   `@author`, `Maintainer:`) and public functions are documented in their
   header with `@brief`, `@param` and `@return`, following `src/lib/heap_buffer.h`.
   All code, comments and UI text are in English.

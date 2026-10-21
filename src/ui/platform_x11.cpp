@@ -15,6 +15,8 @@
 #include <string.h>
 #include "deps/xlib.h"
 
+namespace crls{
+
 /** @brief X11 resources of the window. */
 static struct{
   Display *dpy;                  /**< Connection to the X server. */
@@ -207,4 +209,6 @@ int platform_font_descent(int font){
 void platform_present(void){
   XCopyArea(x11.dpy, x11.buffer, x11.win, x11.gc, 0, 0, (unsigned int) x11.width, (unsigned int) x11.height, 0, 0);
   XFlush(x11.dpy);
+}
+
 }

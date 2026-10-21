@@ -22,6 +22,8 @@
 #include "core/net.h"
 #include "core/util.h"
 
+namespace crls{
+
 #define DEFAULT_PORT       8080
 #define DEFAULT_BIND       "127.0.0.1"
 #define DEFAULT_MAX_UPLOAD (1ULL << 30)
@@ -441,4 +443,6 @@ int server_main(int argc, char **argv){
     }
   }
   return server_run(&cfg);
+}
+
 }

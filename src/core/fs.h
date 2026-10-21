@@ -28,6 +28,8 @@
 #include <stdint.h>
 #include <fcntl.h>
 
+namespace crls{
+
 #ifndef O_BINARY
 #define O_BINARY 0
 #endif
@@ -175,5 +177,7 @@ const char* fs_basename(const char *path);
  * @return True if the name is safe, false otherwise.
  */
 bool        fs_is_plain_name(const char *name);
+
+}
 
 #endif

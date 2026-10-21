@@ -23,6 +23,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+namespace crls{
+
 /** @brief A socket: a descriptor on POSIX, a SOCKET on Windows. */
 typedef intptr_t net_socket;
 
@@ -91,5 +93,7 @@ bool       net_send_all(net_socket s, const void *buf, size_t len);
  * @param s Socket.
  */
 void       net_close(net_socket s);
+
+}
 
 #endif

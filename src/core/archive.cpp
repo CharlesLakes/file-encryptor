@@ -20,6 +20,8 @@
 #include "core/util.h"
 #include "deps/sodium.h"
 
+namespace crls{
+
 /** @brief Shared scratch buffers; only one chunk is processed at a time. */
 static unsigned char plain_chunk[CHUNK];
 static unsigned char cipher_chunk[CHUNK + STREAM_ABYTES];
@@ -832,4 +834,6 @@ int archive_extract_entry(archive *a, unsigned int index, const char *dir){
     return -1;
   }
   return 1;
+}
+
 }

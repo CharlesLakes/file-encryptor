@@ -17,6 +17,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+namespace crls{
+
 /**
  * @brief  Reads a password without echoing it. When standard input is not a
  *         terminal (a pipe or a file), one line is read from it instead, so
@@ -27,5 +29,7 @@
  * @return True if a line was read (without its line ending), false otherwise.
  */
 bool tty_read_password(const char *prompt, char *out, size_t out_size);
+
+}
 
 #endif

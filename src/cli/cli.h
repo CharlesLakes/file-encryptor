@@ -18,6 +18,8 @@
 #ifndef CLI_CLI_H
 #define CLI_CLI_H
 
+namespace crls{
+
 /**
  * @brief  Runs `--upload <url> <file>...`.
  * @param  argc Number of arguments, starting at "--upload".
@@ -26,5 +28,7 @@
  *         2 on a usage error.
  */
 int cli_upload(int argc, char **argv);
+
+}
 
 #endif

@@ -29,6 +29,8 @@
 #include <stdbool.h>
 #include "core/archive.h"
 
+namespace crls{
+
 #define REMOTE_BLOCK (1u << 20)   /**< Size of the read cache and of each Range request. */
 
 /**
@@ -56,5 +58,7 @@ bool remote_open(archive *a, const char *url, const char *password);
  * @return True on success, false otherwise (the status explains why).
  */
 bool remote_add_file(archive *a, const char *path);
+
+}
 
 #endif

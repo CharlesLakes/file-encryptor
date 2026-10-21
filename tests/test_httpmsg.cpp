@@ -11,6 +11,8 @@
 #include "core/httpmsg.h"
 #include "test_util.h"
 
+using namespace crls;
+
 /** @brief One request head and the expected parse result. */
 typedef struct{
   const char *text;                    /**< Raw request head. */

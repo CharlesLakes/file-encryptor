@@ -20,6 +20,8 @@
 #include "core/status.h"
 #include "core/util.h"
 
+namespace crls{
+
 /**
  * @brief  Order of the listing: ".." first, then folders, then files, each
  *         group in case-insensitive order.
@@ -100,4 +102,6 @@ void browser_enter(browser *b, const char *name){
 
 dir_item* browser_get_item(browser *b, unsigned int index){
   return &b->items[index];
+}
+
 }

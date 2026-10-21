@@ -19,6 +19,8 @@
 #include "deps/sodium.h"
 #include "test_util.h"
 
+using namespace crls;
+
 #define PASSWORD "upload-password"
 #define MAX_BODY (64ULL << 20)
 

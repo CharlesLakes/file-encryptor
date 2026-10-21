@@ -25,6 +25,8 @@
 #include <string.h>
 #include <windows.h>
 
+namespace crls{
+
 /** @brief Win32 resources of the window. */
 static struct{
   HWND win;                      /**< Main window. */
@@ -354,4 +356,6 @@ void platform_present(void){
   HDC dc = GetDC(w32.win);
   BitBlt(dc, 0, 0, w32.width, w32.height, w32.buffer, 0, 0, SRCCOPY);
   ReleaseDC(w32.win, dc);
+}
+
 }

@@ -77,6 +77,8 @@
 #include <vector>
 #include "core/source.h"
 
+namespace crls{
+
 #define MAGIC           "CRLS\0\0"        /**< Magic number at the start of every archive. */
 #define MAGIC_BYTES     6                 /**< Length of the magic number. */
 #define KEY_BYTES       32                /**< Symmetric key length. */
@@ -309,5 +311,7 @@ int            archive_extract_entry(archive *a, unsigned int index, const char 
  * @return True if the extension matches, false otherwise.
  */
 bool           has_crls_ext(const char *name);
+
+}
 
 #endif

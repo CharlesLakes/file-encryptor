@@ -15,6 +15,8 @@
 #include "core/status.h"
 #include "deps/sodium.h"
 
+namespace crls{
+
 int cli_upload(int argc, char **argv){
   if(argc < 3 || !remote_is_url(argv[1])){
     fprintf(stderr, "usage: file-encryptor --upload <http(s) URL of a .crls> <file> [file ...]\n");
@@ -45,4 +47,6 @@ int cli_upload(int argc, char **argv){
   }
   archive_free(&a);
   return failed ? 1 : 0;
+}
+
 }

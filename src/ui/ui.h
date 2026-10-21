@@ -42,6 +42,8 @@
 #include "core/browser.h"
 #include "ui/platform.h"
 
+namespace crls{
+
 /* ---------------- Geometry (pixels) ---------------- */
 
 /*
@@ -265,5 +267,7 @@ void handle_click(const ui_event *event);
  * @param event EVENT_KEY event.
  */
 void handle_key(const ui_event *event);
+
+}
 
 #endif

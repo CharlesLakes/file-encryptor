@@ -18,6 +18,8 @@
 #include <winhttp.h>
 #include "core/fs.h"
 
+namespace crls{
+
 #ifndef WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
 #define WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY 4
 #endif
@@ -153,4 +155,6 @@ bool http_perform(const http_request_spec *req, http_response *resp){
   if(connection) WinHttpCloseHandle(connection);
   WinHttpCloseHandle(session);
   return ok;
+}
+
 }

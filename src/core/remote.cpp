@@ -18,6 +18,8 @@
 #include "core/status.h"
 #include "core/util.h"
 
+namespace crls{
+
 #define MAX_UPLOAD_ATTEMPTS 5
 
 /** @brief State of a remote archive_source. */
@@ -257,4 +259,6 @@ bool remote_add_file(archive *a, const char *path){
   }
   append_discard(&up);
   return ok;
+}
+
 }

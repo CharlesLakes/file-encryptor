@@ -11,6 +11,8 @@
 #include <string.h>
 #include "core/fs.h"
 
+namespace crls{
+
 /** @brief read_at() of a local source. */
 static bool file_read_at(archive_source *src, void *buf, size_t len, uint64_t offset){
   return read_at(src->fd, buf, len, offset);
@@ -32,4 +34,6 @@ void source_close(archive_source *src){
   if(src->close) src->close(src);
   memset(src, 0, sizeof(*src));
   src->fd = -1;
+}
+
 }

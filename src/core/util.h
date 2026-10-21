@@ -14,6 +14,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+namespace crls{
+
 /**
  * @brief Encodes value as a little-endian integer.
  * @param p     Destination buffer (at least bytes long).
@@ -47,5 +49,7 @@ void     format_size(uint64_t size, char *out, size_t out_size);
  * @param name     Entry name.
  */
 void     join_path(char *out, size_t out_size, const char *dir, const char *name);
+
+}
 
 #endif

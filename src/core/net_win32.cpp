@@ -16,6 +16,8 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+namespace crls{
+
 bool net_init(void){
   WSADATA data;
   return WSAStartup(MAKEWORD(2, 2), &data) == 0;
@@ -114,4 +116,6 @@ bool net_send_all(net_socket s, const void *buf, size_t len){
 
 void net_close(net_socket s){
   if(s != NET_INVALID) closesocket((SOCKET) s);
+}
+
 }

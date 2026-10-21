@@ -21,6 +21,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+namespace crls{
+
 typedef struct archive_source archive_source;
 
 /**
@@ -50,5 +52,7 @@ void source_from_fd(archive_source *src, int fd);
  * @param src Source.
  */
 void source_close(archive_source *src);
+
+}
 
 #endif

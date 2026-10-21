@@ -10,6 +10,8 @@
 
 #include <string.h>
 
+namespace crls{
+
 /**
  * @brief  Compares two strings of known length case-insensitively (ASCII).
  * @param  a     First string.
@@ -236,4 +238,6 @@ const char* http_reason(int status){
     case 503: return "Service Unavailable";
   }
   return "Unknown";
+}
+
 }

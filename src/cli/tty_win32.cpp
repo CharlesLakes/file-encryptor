@@ -12,6 +12,8 @@
 #include <string.h>
 #include <windows.h>
 
+namespace crls{
+
 bool tty_read_password(const char *prompt, char *out, size_t out_size){
   HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
   DWORD mode;
@@ -29,4 +31,6 @@ bool tty_read_password(const char *prompt, char *out, size_t out_size){
   }
   if(ok) out[strcspn(out, "\r\n")] = '\0';
   return ok;
+}
+
 }

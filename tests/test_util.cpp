@@ -18,6 +18,8 @@
 #include <io.h>
 #endif
 
+using namespace crls;
+
 int failures = 0;
 char test_dir[PATH_MAX];
 

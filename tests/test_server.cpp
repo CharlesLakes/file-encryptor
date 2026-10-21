@@ -23,6 +23,8 @@
 #include "server_fixture.h"
 #include "test_util.h"
 
+using namespace crls;
+
 #define PASSWORD "server-password"
 
 static int port;

@@ -16,6 +16,8 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 
+namespace crls{
+
 bool read_at(int fd, void *buf, size_t len, uint64_t offset){
   unsigned char *p = (unsigned char *) buf;
   while(len > 0){
@@ -124,4 +126,6 @@ const char* fs_basename(const char *path){
 
 bool fs_is_plain_name(const char *name){
   return name[0] != '\0' && strchr(name, '/') == NULL && strcmp(name, ".") != 0 && strcmp(name, "..") != 0;
+}
+
 }

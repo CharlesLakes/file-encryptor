@@ -27,6 +27,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+namespace crls{
+
 /**
  * @brief Receives response body bytes.
  * @param ctx  State of the receiver.
@@ -67,5 +69,7 @@ typedef struct{
  *         transport error (resp->error explains it).
  */
 bool http_perform(const http_request_spec *req, http_response *resp);
+
+}
 
 #endif

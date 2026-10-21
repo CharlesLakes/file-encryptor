@@ -10,6 +10,8 @@
 
 #include <string.h>
 
+namespace crls{
+
 app_state app;
 
 void app_init(void){
@@ -121,4 +123,6 @@ int get_buttons(button *b){
     count++;
   }
   return count;
+}
+
 }

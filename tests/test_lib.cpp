@@ -19,6 +19,8 @@
 #include "lib/unique_fd.h"
 #include "test_util.h"
 
+using namespace crls;
+
 /**
  * @brief  Calls f with every value from 1 to n and returns the sum of the
  *         results, as a callback-taking function would.

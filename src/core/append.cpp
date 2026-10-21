@@ -17,6 +17,8 @@
 #include "core/util.h"
 #include "deps/sodium.h"
 
+namespace crls{
+
 /** @brief Scratch buffer used to stream bodies. */
 static unsigned char body_chunk[CHUNK];
 
@@ -198,4 +200,6 @@ append_result append_commit(int fd, const append_state *st, const append_claim *
   /* Once the header points to the new index, the body must stay. */
   if(result != APPEND_OK && !pointer_written) fs_truncate(fd, c->base);
   return result;
+}
+
 }

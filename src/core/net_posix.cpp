@@ -17,6 +17,8 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 
+namespace crls{
+
 bool net_init(void){
   return signal(SIGPIPE, SIG_IGN) != SIG_ERR;
 }
@@ -112,4 +114,6 @@ bool net_send_all(net_socket s, const void *buf, size_t len){
 
 void net_close(net_socket s){
   if(s != NET_INVALID) close((int) s);
+}
+
 }

@@ -25,6 +25,8 @@
 #include <string.h>
 #include <windows.h>
 
+namespace crls{
+
 /** @brief Largest transfer passed to a single ReadFile() or WriteFile() call. */
 #define MAX_TRANSFER (1u << 30)
 
@@ -230,4 +232,6 @@ bool fs_is_plain_name(const char *name){
   for(const char *p = name; *p; p++)
     if((unsigned char) *p < 32 || strchr("/\\:*?\"<>|", *p)) return false;
   return !is_device_name(name);
+}
+
 }

@@ -11,6 +11,8 @@
 #include <string.h>
 #include "core/fs.h"
 
+namespace crls{
+
 #define DOUBLE_CLICK_MS 400   /**< Maximum interval between the clicks of a double click. */
 
 /**
@@ -125,4 +127,6 @@ void handle_key(const ui_event *event){
   }else if(key == KEY_DELETE && app.screen == SCREEN_ARCHIVE){
     handle_action(ACT_DELETE);
   }
+}
+
 }

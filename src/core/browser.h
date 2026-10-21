@@ -21,6 +21,8 @@
 #include "core/archive.h"
 #include <vector>
 
+namespace crls{
+
 /**
  * @brief Single entry of a directory listing.
  */
@@ -81,5 +83,7 @@ void      browser_enter(browser *b, const char *name);
  * @return Pointer to the item.
  */
 dir_item* browser_get_item(browser *b, unsigned int index);
+
+}
 
 #endif

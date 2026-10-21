@@ -17,6 +17,8 @@
 #include "core/util.h"
 #include "deps/sodium.h"
 
+namespace crls{
+
 /* ---------------- Helpers ---------------- */
 
 void clear_secrets(void){
@@ -319,4 +321,6 @@ void select_row(int index){
   if(*list_sel() != index) app.confirm_delete = -1;
   *list_sel() = index;
   on_browser_select();
+}
+
 }

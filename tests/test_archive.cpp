@@ -17,6 +17,8 @@
 #include "core/util.h"
 #include "test_util.h"
 
+using namespace crls;
+
 /**
  * @brief Extracts every entry into out_name and compares each file with its
  *        original.

@@ -14,6 +14,8 @@
 #include "core/status.h"
 #include "core/util.h"
 
+namespace crls{
+
 /* ---------------- Primitives ---------------- */
 
 /**
@@ -242,4 +244,6 @@ void draw(void){
                 status_error ? COLOR_ERROR : COLOR_OK);
 
   platform_present();
+}
+
 }

@@ -11,6 +11,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+namespace crls{
+
 char status_text[640] = "";
 bool status_error = false;
 
@@ -25,4 +27,6 @@ void set_status(bool error, const char *format, ...){
 void clear_status(void){
   status_text[0] = '\0';
   status_error = false;
+}
+
 }

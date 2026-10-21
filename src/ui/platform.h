@@ -26,6 +26,8 @@
 
 #include <stdbool.h>
 
+namespace crls{
+
 /** @brief Fonts available to the user interface. */
 enum{ FONT_REGULAR, FONT_BOLD, FONT_TITLE, FONT_COUNT };
 
@@ -168,5 +170,7 @@ int  platform_font_descent(int font);
  * @brief Copies the off-screen buffer to the window.
  */
 void platform_present(void);
+
+}
 
 #endif

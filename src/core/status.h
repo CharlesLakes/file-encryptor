@@ -17,6 +17,8 @@
 
 #include <stdbool.h>
 
+namespace crls{
+
 extern char status_text[640];   /**< Current status message. */
 extern bool status_error;       /**< True if the current message is an error. */
 
@@ -43,5 +45,7 @@ void set_status(bool error, const char *format, ...) CRLS_PRINTF(2, 3);
  * @brief Clears the status message.
  */
 void clear_status(void);
+
+}
 
 #endif

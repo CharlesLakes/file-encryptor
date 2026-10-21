@@ -14,6 +14,8 @@
 #include "server/server.h"
 #include "test_util.h"
 
+using namespace crls;
+
 #ifdef _WIN32
 #include <windows.h>
 static HANDLE thread;

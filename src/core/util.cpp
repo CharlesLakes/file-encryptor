@@ -12,6 +12,8 @@
 #include <string.h>
 #include "core/fs.h"
 
+namespace crls{
+
 void put_le(unsigned char *p, uint64_t value, int bytes){
   for(int i = 0; i < bytes; i++)
     p[i] = (unsigned char) (value >> (8*i));
@@ -40,4 +42,6 @@ void join_path(char *out, size_t out_size, const char *dir, const char *name){
   size_t len = strlen(dir);
   if(len > 0 && fs_is_separator(dir[len - 1])) snprintf(out, out_size, "%s%s", dir, name);
   else snprintf(out, out_size, "%s/%s", dir, name);
+}
+
 }

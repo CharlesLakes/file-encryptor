@@ -57,6 +57,8 @@
 #include <stdint.h>
 #include "core/archive.h"
 
+namespace crls{
+
 #define APPEND_DOMAIN        "CRLS-APPEND-1"   /**< Domain separation string. */
 #define APPEND_DOMAIN_BYTES  14                /**< Its length including the zero byte. */
 #define BODY_HASH_BYTES      32                /**< BLAKE2b output length. */
@@ -197,5 +199,7 @@ append_result append_check(const append_state *st, const append_claim *c, uint64
  */
 append_result append_commit(int fd, const append_state *st, const append_claim *c,
                             append_reader read, void *ctx);
+
+}
 
 #endif
