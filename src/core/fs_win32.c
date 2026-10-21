@@ -169,6 +169,26 @@ const char* fs_basename(const char *path){
   return name;
 }
 
+/**
+ * @brief  Checks whether name is a reserved device name such as "CON", "NUL"
+ *         or "COM1", with or without an extension ("nul.txt" is the device
+ *         too).
+ * @param  name File name.
+ * @return True if the name refers to a device.
+ */
+static bool is_device_name(const char *name){
+  static const char *devices[] = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", NULL};
+  size_t stem = strcspn(name, ".");
+  char upper[8];
+  if(stem >= sizeof(upper)) return false;
+  for(size_t i = 0; i < stem; i++) upper[i] = (char) (name[i] >= 'a' && name[i] <= 'z' ? name[i] - 32 : name[i]);
+  upper[stem] = '\0';
+  for(int i = 0; devices[i]; i++)
+    if(strcmp(upper, devices[i]) == 0) return true;
+  return stem == 4 && (strncmp(upper, "COM", 3) == 0 || strncmp(upper, "LPT", 3) == 0) &&
+         upper[3] >= '1' && upper[3] <= '9';
+}
+
 bool fs_is_plain_name(const char *name){
   size_t len = strlen(name);
   if(len == 0 || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return false;
@@ -176,5 +196,5 @@ bool fs_is_plain_name(const char *name){
   if(name[len - 1] == '.' || name[len - 1] == ' ') return false;
   for(const char *p = name; *p; p++)
     if((unsigned char) *p < 32 || strchr("/\\:*?\"<>|", *p)) return false;
-  return true;
+  return !is_device_name(name);
 }
