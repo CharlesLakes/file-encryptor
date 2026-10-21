@@ -8,25 +8,29 @@
 
 #include "core/httpmsg.h"
 
-#include <string.h>
-
 namespace crls{
 
+namespace{
+
 /**
- * @brief  Compares two strings of known length case-insensitively (ASCII).
- * @param  a     First string.
- * @param  a_len Length of a.
- * @param  b     Second string, NUL-terminated.
+ * @brief  Lowercases an ASCII character.
+ * @param  c Character.
+ * @return c in lowercase.
+ */
+char lower(char c){
+  return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+/**
+ * @brief  Compares two strings case-insensitively (ASCII).
+ * @param  a First string.
+ * @param  b Second string.
  * @return True if they are equal.
  */
-static bool equals_nocase(const char *a, size_t a_len, const char *b){
-  if(a_len != strlen(b)) return false;
-  for(size_t i = 0; i < a_len; i++){
-    char x = a[i], y = b[i];
-    if(x >= 'A' && x <= 'Z') x = (char) (x - 'A' + 'a');
-    if(y >= 'A' && y <= 'Z') y = (char) (y - 'A' + 'a');
-    if(x != y) return false;
-  }
+bool equals_nocase(std::string_view a, std::string_view b){
+  if(a.size() != b.size()) return false;
+  for(std::size_t i = 0; i < a.size(); i++)
+    if(lower(a[i]) != lower(b[i])) return false;
   return true;
 }
 
@@ -35,100 +39,20 @@ static bool equals_nocase(const char *a, size_t a_len, const char *b){
  * @param  c Character.
  * @return True if c is a token character.
  */
-static bool is_token_char(char c){
+bool is_token_char(char c){
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-         (c != 0 && strchr("!#$%&'*+-.^_`|~", c) != NULL);
+         std::string_view("!#$%&'*+-.^_`|~").find(c) != std::string_view::npos;
 }
 
-bool http_parse_u64(const char *s, size_t len, uint64_t *value){
-  if(len == 0 || len > 20) return false;
-  uint64_t v = 0;
-  for(size_t i = 0; i < len; i++){
-    if(s[i] < '0' || s[i] > '9') return false;
-    uint64_t digit = (uint64_t) (s[i] - '0');
-    if(v > (UINT64_MAX - digit) / 10) return false;
-    v = v * 10 + digit;
-  }
-  *value = v;
-  return true;
-}
-
-http_parse_result http_parse_request(const char *buf, size_t len, http_request *req){
-  memset(req, 0, sizeof(*req));
-  const char *end = buf + len, *p = buf;
-  bool first_line = true;
-
-  while(true){
-    const char *eol = NULL;
-    for(const char *q = p; q + 1 < end; q++)
-      if(q[0] == '\r' && q[1] == '\n'){
-        eol = q;
-        break;
-      }
-    if(!eol){
-      if((size_t) (end - p) >= HTTP_MAX_LINE || len >= HTTP_MAX_HEAD) return HTTP_PARSE_TOO_LARGE;
-      return HTTP_PARSE_INCOMPLETE;
-    }
-    size_t line_len = (size_t) (eol - p);
-    if(line_len >= HTTP_MAX_LINE || (size_t) (eol + 2 - buf) > HTTP_MAX_HEAD) return HTTP_PARSE_TOO_LARGE;
-    for(size_t i = 0; i < line_len; i++)
-      if(p[i] == '\0' || p[i] == '\r' || p[i] == '\n') return HTTP_PARSE_BAD;
-
-    if(first_line){
-      /* METHOD SP target SP HTTP/1.x */
-      const char *sp1 = (const char *) memchr(p, ' ', line_len);
-      const char *sp2 = sp1 ? (const char *) memchr(sp1 + 1, ' ', (size_t) (eol - sp1 - 1)) : NULL;
-      if(!sp1 || !sp2) return HTTP_PARSE_BAD;
-      size_t method_len = (size_t) (sp1 - p), target_len = (size_t) (sp2 - sp1 - 1);
-      size_t version_len = (size_t) (eol - sp2 - 1);
-      if(method_len == 0 || method_len >= sizeof(req->method) || target_len == 0 ||
-         target_len >= sizeof(req->target)) return HTTP_PARSE_BAD;
-      if(version_len != 8 || (memcmp(sp2 + 1, "HTTP/1.1", 8) != 0 && memcmp(sp2 + 1, "HTTP/1.0", 8) != 0))
-        return HTTP_PARSE_BAD;
-      for(size_t i = 0; i < method_len; i++)
-        if(p[i] < 'A' || p[i] > 'Z') return HTTP_PARSE_BAD;
-      memcpy(req->method, p, method_len);
-      memcpy(req->target, sp1 + 1, target_len);
-      first_line = false;
-    }else if(line_len == 0){
-      req->head_length = (size_t) (eol + 2 - buf);
-      return HTTP_PARSE_OK;
-    }else{
-      const char *colon = (const char *) memchr(p, ':', line_len);
-      if(!colon || colon == p) return HTTP_PARSE_BAD;
-      for(const char *q = p; q < colon; q++)
-        if(!is_token_char(*q)) return HTTP_PARSE_BAD;
-      if(req->header_count >= HTTP_MAX_HEADERS) return HTTP_PARSE_TOO_LARGE;
-
-      const char *value = colon + 1, *value_end = eol;
-      while(value < value_end && (*value == ' ' || *value == '\t')) value++;
-      while(value_end > value && (value_end[-1] == ' ' || value_end[-1] == '\t')) value_end--;
-      http_header *h = &req->headers[req->header_count++];
-      h->name = p;
-      h->name_len = (size_t) (colon - p);
-      h->value = value;
-      h->value_len = (size_t) (value_end - value);
-
-      if(equals_nocase(h->name, h->name_len, "Transfer-Encoding")) return HTTP_PARSE_UNSUPPORTED;
-      if(equals_nocase(h->name, h->name_len, "Content-Length")){
-        if(req->has_length || !http_parse_u64(h->value, h->value_len, &req->content_length)) return HTTP_PARSE_BAD;
-        req->has_length = true;
-      }
-    }
-    p = eol + 2;
-  }
-}
-
-bool http_get_header(const http_request *req, const char *name, char *out, size_t out_size){
-  for(int i = 0; i < req->header_count; i++){
-    const http_header *h = &req->headers[i];
-    if(!equals_nocase(h->name, h->name_len, name)) continue;
-    if(h->value_len >= out_size) return false;
-    memcpy(out, h->value, h->value_len);
-    out[h->value_len] = '\0';
-    return true;
-  }
-  return false;
+/**
+ * @brief  Removes spaces and tabs from both ends.
+ * @param  s String.
+ * @return The trimmed slice.
+ */
+std::string_view trim(std::string_view s){
+  while(!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
+  while(!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.remove_suffix(1);
+  return s;
 }
 
 /**
@@ -136,80 +60,171 @@ bool http_get_header(const http_request *req, const char *name, char *out, size_
  * @param  c Character.
  * @return 0 to 15, or -1 if c is not a hexadecimal digit.
  */
-static int hex_value(char c){
+int hex_value(char c){
   if(c >= '0' && c <= '9') return c - '0';
   if(c >= 'a' && c <= 'f') return c - 'a' + 10;
   if(c >= 'A' && c <= 'F') return c - 'A' + 10;
   return -1;
 }
 
-bool http_decode_path(const char *target, char *out, size_t out_size){
-  if(target[0] != '/') return false;
-  size_t n = 0;
-  for(const char *p = target + 1; *p; p++){
-    char c = *p;
-    if(c == '?' || c == '#') return false;
-    if(c == '%'){
-      int hi = hex_value(p[1]), lo = hi < 0 ? -1 : hex_value(p[2]);
-      if(hi < 0 || lo < 0) return false;
-      c = (char) (hi * 16 + lo);
-      if(c == '\0') return false;
-      p += 2;
-    }
-    if(n + 1 >= out_size) return false;
-    out[n++] = c;
-  }
-  out[n] = '\0';
+/**
+ * @brief  Parses the request line "METHOD SP target SP HTTP/1.x".
+ * @param  line Request line without CRLF.
+ * @param  req  Request whose method and target are set.
+ * @return True if the line is valid.
+ */
+bool parse_request_line(std::string_view line, http_request &req){
+  std::size_t sp1 = line.find(' ');
+  std::size_t sp2 = sp1 == std::string_view::npos ? sp1 : line.find(' ', sp1 + 1);
+  if(sp2 == std::string_view::npos) return false;
+  std::string_view method = line.substr(0, sp1), target = line.substr(sp1 + 1, sp2 - sp1 - 1);
+  std::string_view version = line.substr(sp2 + 1);
+  if(method.empty() || method.size() >= 16 || target.empty() || target.size() >= 1024) return false;
+  if(version != "HTTP/1.1" && version != "HTTP/1.0") return false;
+  for(char c : method)
+    if(c < 'A' || c > 'Z') return false;
+  req.method = method;
+  req.target = target;
   return true;
 }
 
-http_range_result http_parse_range(const char *value, uint64_t size, uint64_t *first, uint64_t *last){
-  if(strncmp(value, "bytes=", 6) != 0) return HTTP_RANGE_INVALID;
-  const char *spec = value + 6, *dash = strchr(spec, '-');
-  if(!dash || strchr(spec, ',')) return HTTP_RANGE_INVALID;
-  size_t a_len = (size_t) (dash - spec), b_len = strlen(dash + 1);
-  uint64_t a, b;
+}
 
-  if(a_len == 0){
+std::optional<uint64_t> http_parse_u64(std::string_view s){
+  if(s.empty() || s.size() > 20) return std::nullopt;
+  uint64_t v = 0;
+  for(char c : s){
+    if(c < '0' || c > '9') return std::nullopt;
+    uint64_t digit = static_cast<uint64_t>(c - '0');
+    if(v > (UINT64_MAX - digit) / 10) return std::nullopt;
+    v = v * 10 + digit;
+  }
+  return v;
+}
+
+http_parse http_parse_request(std::string_view bytes, http_request &req){
+  req = http_request();
+  std::size_t pos = 0;
+  bool first_line = true;
+
+  while(true){
+    std::size_t eol = bytes.find("\r\n", pos);
+    if(eol == std::string_view::npos){
+      if(bytes.size() - pos >= http_max_line || bytes.size() >= http_max_head) return http_parse::too_large;
+      return http_parse::incomplete;
+    }
+    std::string_view line = bytes.substr(pos, eol - pos);
+    if(line.size() >= http_max_line || eol + 2 > http_max_head) return http_parse::too_large;
+    if(line.find_first_of(std::string_view("\0\r\n", 3)) != std::string_view::npos) return http_parse::bad;
+
+    if(first_line){
+      if(!parse_request_line(line, req)) return http_parse::bad;
+      first_line = false;
+    }else if(line.empty()){
+      req.head_length = eol + 2;
+      return http_parse::ok;
+    }else{
+      std::size_t colon = line.find(':');
+      if(colon == std::string_view::npos || colon == 0) return http_parse::bad;
+      std::string_view name = line.substr(0, colon);
+      for(char c : name)
+        if(!is_token_char(c)) return http_parse::bad;
+      if(req.header_count >= http_max_headers) return http_parse::too_large;
+
+      http_header &h = req.headers[req.header_count++];
+      h.name = name;
+      h.value = trim(line.substr(colon + 1));
+
+      if(equals_nocase(h.name, "Transfer-Encoding")) return http_parse::unsupported;
+      if(equals_nocase(h.name, "Content-Length")){
+        std::optional<uint64_t> length = http_parse_u64(h.value);
+        if(req.has_length || !length) return http_parse::bad;
+        req.content_length = *length;
+        req.has_length = true;
+      }
+    }
+    pos = eol + 2;
+  }
+}
+
+std::optional<std::string_view> http_header_value(const http_request &req, std::string_view name){
+  for(std::size_t i = 0; i < req.header_count; i++)
+    if(equals_nocase(req.headers[i].name, name)) return req.headers[i].value;
+  return std::nullopt;
+}
+
+bool http_decode_path(std::string_view target, std::string &out){
+  out.clear();
+  if(target.empty() || target[0] != '/') return false;
+  for(std::size_t i = 1; i < target.size(); i++){
+    char c = target[i];
+    if(c == '?' || c == '#') return false;
+    if(c == '%'){
+      int hi = i + 1 < target.size() ? hex_value(target[i + 1]) : -1;
+      int lo = hi >= 0 && i + 2 < target.size() ? hex_value(target[i + 2]) : -1;
+      if(hi < 0 || lo < 0) return false;
+      c = static_cast<char>(hi * 16 + lo);
+      if(c == '\0') return false;
+      i += 2;
+    }
+    out += c;
+  }
+  return true;
+}
+
+std::optional<http_range> http_parse_range(std::string_view value, uint64_t size){
+  if(!value.starts_with("bytes=")) return std::nullopt;
+  std::string_view spec = value.substr(6);
+  std::size_t dash = spec.find('-');
+  if(dash == std::string_view::npos || spec.find(',') != std::string_view::npos) return std::nullopt;
+  std::string_view a = spec.substr(0, dash), b = spec.substr(dash + 1);
+
+  if(a.empty()){
     /* Suffix range: the last b bytes. */
-    if(!http_parse_u64(dash + 1, b_len, &b) || b == 0 || size == 0) return HTTP_RANGE_INVALID;
-    *first = b >= size ? 0 : size - b;
-    *last = size - 1;
-    return HTTP_RANGE_OK;
+    std::optional<uint64_t> count = http_parse_u64(b);
+    if(!count || *count == 0 || size == 0) return std::nullopt;
+    return http_range{*count >= size ? 0 : size - *count, size - 1};
   }
-  if(!http_parse_u64(spec, a_len, &a) || a >= size) return HTTP_RANGE_INVALID;
-  if(b_len == 0) b = size - 1;
-  else if(!http_parse_u64(dash + 1, b_len, &b) || b < a) return HTTP_RANGE_INVALID;
-  *first = a;
-  *last = b >= size ? size - 1 : b;
-  return HTTP_RANGE_OK;
+  std::optional<uint64_t> first = http_parse_u64(a);
+  if(!first || *first >= size) return std::nullopt;
+  uint64_t last = size - 1;
+  if(!b.empty()){
+    std::optional<uint64_t> end = http_parse_u64(b);
+    if(!end || *end < *first) return std::nullopt;
+    if(*end < last) last = *end;
+  }
+  return http_range{*first, last};
 }
 
-bool http_parse_content_range(const char *value, uint64_t *first, uint64_t *last, uint64_t *total){
-  if(strncmp(value, "bytes ", 6) != 0) return false;
-  const char *spec = value + 6, *dash = strchr(spec, '-'), *slash = strchr(spec, '/');
-  if(!dash || !slash || slash < dash) return false;
-  return http_parse_u64(spec, (size_t) (dash - spec), first) &&
-         http_parse_u64(dash + 1, (size_t) (slash - dash - 1), last) &&
-         http_parse_u64(slash + 1, strlen(slash + 1), total) &&
-         *first <= *last && *last < *total;
+std::optional<http_content_range> http_parse_content_range(std::string_view value){
+  if(!value.starts_with("bytes ")) return std::nullopt;
+  std::string_view spec = value.substr(6);
+  std::size_t dash = spec.find('-'), slash = spec.find('/');
+  if(dash == std::string_view::npos || slash == std::string_view::npos || slash < dash) return std::nullopt;
+  std::optional<uint64_t> first = http_parse_u64(spec.substr(0, dash));
+  std::optional<uint64_t> last = http_parse_u64(spec.substr(dash + 1, slash - dash - 1));
+  std::optional<uint64_t> total = http_parse_u64(spec.substr(slash + 1));
+  if(!first || !last || !total || *first > *last || *last >= *total) return std::nullopt;
+  return http_content_range{*first, *last, *total};
 }
 
-void http_hex_encode(const unsigned char *data, size_t len, char *out){
+std::string http_hex_encode(std::span<const unsigned char> data){
   static const char digits[] = "0123456789abcdef";
-  for(size_t i = 0; i < len; i++){
-    out[2*i] = digits[data[i] >> 4];
-    out[2*i + 1] = digits[data[i] & 15];
+  std::string out;
+  out.reserve(2 * data.size());
+  for(unsigned char b : data){
+    out += digits[b >> 4];
+    out += digits[b & 15];
   }
-  out[2*len] = '\0';
+  return out;
 }
 
-bool http_hex_decode(const char *hex, unsigned char *out, size_t len){
-  if(strlen(hex) != 2 * len) return false;
-  for(size_t i = 0; i < len; i++){
+bool http_hex_decode(std::string_view hex, std::span<unsigned char> out){
+  if(hex.size() != 2 * out.size()) return false;
+  for(std::size_t i = 0; i < out.size(); i++){
     int hi = hex_value(hex[2*i]), lo = hex_value(hex[2*i + 1]);
     if(hi < 0 || lo < 0) return false;
-    out[i] = (unsigned char) (hi * 16 + lo);
+    out[i] = static_cast<unsigned char>(hi * 16 + lo);
   }
   return true;
 }

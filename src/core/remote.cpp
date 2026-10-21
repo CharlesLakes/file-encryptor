@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <optional>
+#include <string>
 #include "core/append.h"
 #include "core/http.h"
 #include "core/httpmsg.h"
@@ -95,14 +97,14 @@ static bool fetch_range(remote_ctx *c, unsigned char *buf, uint64_t first, size_
     return false;
   }
 
-  uint64_t r_first, r_last, total;
-  if(!http_parse_content_range(resp.content_range, &r_first, &r_last, &total) || r_first != first ||
-     r_last - r_first + 1 != sink.received || (check_etag && total != c->size)){
+  std::optional<http_content_range> received = http_parse_content_range(resp.content_range);
+  if(!received || received->first != first || received->last - received->first + 1 != sink.received ||
+     (check_etag && received->total != c->size)){
     set_status(true, "The server sent an unexpected range for %s.", c->url);
     return false;
   }
   if(!check_etag){
-    c->size = total;
+    c->size = received->total;
     snprintf(c->etag, sizeof(c->etag), "%s", resp.etag);
   }
   *got = sink.received;
@@ -190,20 +192,14 @@ bool remote_open(archive *a, const char *url, const char *password){
  * @return True if a response was received.
  */
 static bool send_upload(remote_ctx *c, const append_upload *up, http_response *resp){
-  char base[64], index_length[64], nonce[32 + 2*NONCE_BYTES], hash[32 + 2*BODY_HASH_BYTES];
-  char sig[32 + 2*SIGN_BYTES], if_match[160];
-  char nonce_hex[2*NONCE_BYTES + 1], hash_hex[2*BODY_HASH_BYTES + 1], sig_hex[2*SIGN_BYTES + 1];
-  snprintf(base, sizeof(base), "X-Crls-Base: %llu", (unsigned long long) up->claim.base);
-  snprintf(index_length, sizeof(index_length), "X-Crls-Index-Length: %llu", (unsigned long long) up->claim.index_length);
-  http_hex_encode(up->claim.index_nonce, NONCE_BYTES, nonce_hex);
-  snprintf(nonce, sizeof(nonce), "X-Crls-Index-Nonce: %s", nonce_hex);
-  http_hex_encode(up->claim.body_hash, BODY_HASH_BYTES, hash_hex);
-  snprintf(hash, sizeof(hash), "X-Crls-Body-Hash: %s", hash_hex);
-  http_hex_encode(up->claim.signature, SIGN_BYTES, sig_hex);
-  snprintf(sig, sizeof(sig), "X-Crls-Sig: %s", sig_hex);
-  snprintf(if_match, sizeof(if_match), "If-Match: %s", c->etag);
-  const char *headers[] = {"Content-Type: application/octet-stream", base, index_length, nonce, hash, sig,
-                           c->etag[0] ? if_match : NULL, NULL};
+  std::string base = "X-Crls-Base: " + std::to_string(up->claim.base);
+  std::string index_length = "X-Crls-Index-Length: " + std::to_string(up->claim.index_length);
+  std::string nonce = "X-Crls-Index-Nonce: " + http_hex_encode(up->claim.index_nonce);
+  std::string hash = "X-Crls-Body-Hash: " + http_hex_encode(up->claim.body_hash);
+  std::string sig = "X-Crls-Sig: " + http_hex_encode(up->claim.signature);
+  std::string if_match = std::string("If-Match: ") + c->etag;
+  const char *headers[] = {"Content-Type: application/octet-stream", base.c_str(), index_length.c_str(),
+                           nonce.c_str(), hash.c_str(), sig.c_str(), c->etag[0] ? if_match.c_str() : NULL, NULL};
 
   http_request_spec req = {"POST", c->url, headers, up->body_fd.get(), up->claim.content_length, NULL, NULL};
   if(http_perform(&req, resp)) return true;

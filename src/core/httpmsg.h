@@ -12,141 +12,139 @@
  * small, unambiguous subset of HTTP/1.1:
  *
  * - The request line and every header line must end in CRLF and fit in
- *   HTTP_MAX_LINE bytes; at most HTTP_MAX_HEADERS headers are accepted.
+ *   http_max_line bytes; at most http_max_headers headers are accepted.
  * - Transfer-Encoding is rejected, and so are repeated or malformed
  *   Content-Length headers, because both open the door to request smuggling.
  * - Range must be a single "bytes=" range.
+ *
+ * Parsed values are std::string_view slices of the received bytes, which must
+ * outlive them.
  */
 
 #ifndef CORE_HTTPMSG_H
 #define CORE_HTTPMSG_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
 
 namespace crls{
 
-#define HTTP_MAX_LINE    8192    /**< Longest accepted request or header line. */
-#define HTTP_MAX_HEADERS 64      /**< Most accepted headers per request. */
-#define HTTP_MAX_HEAD    16384   /**< Longest accepted request head (line and headers). */
+inline constexpr std::size_t http_max_line = 8192;      /**< Longest accepted request or header line. */
+inline constexpr std::size_t http_max_headers = 64;     /**< Most accepted headers per request. */
+inline constexpr std::size_t http_max_head = 16384;     /**< Longest accepted request head (line and headers). */
 
 /** @brief Result of http_parse_request(). */
-typedef enum{
-  HTTP_PARSE_OK,             /**< A complete, valid request head. */
-  HTTP_PARSE_INCOMPLETE,     /**< More bytes are needed. */
-  HTTP_PARSE_BAD,            /**< Malformed request (400). */
-  HTTP_PARSE_TOO_LARGE,      /**< Line, head or header count over the limit (431). */
-  HTTP_PARSE_UNSUPPORTED     /**< Transfer-Encoding or another unsupported feature (501). */
-}http_parse_result;
-
-/** @brief Result of http_parse_range(). */
-typedef enum{
-  HTTP_RANGE_OK,             /**< One satisfiable range. */
-  HTTP_RANGE_INVALID         /**< Malformed, multiple or unsatisfiable range (416). */
-}http_range_result;
+enum class http_parse{
+  ok,                        /**< A complete, valid request head. */
+  incomplete,                /**< More bytes are needed. */
+  bad,                       /**< Malformed request (400). */
+  too_large,                 /**< Line, head or header count over the limit (431). */
+  unsupported                /**< Transfer-Encoding or another unsupported feature (501). */
+};
 
 /**
- * @brief One header of a request; points into the parsed buffer.
+ * @brief One header of a request.
  */
-typedef struct{
-  const char *name;          /**< Header name (not terminated). */
-  size_t name_len;           /**< Length of name. */
-  const char *value;         /**< Value without surrounding spaces (not terminated). */
-  size_t value_len;          /**< Length of value. */
-}http_header;
+struct http_header{
+  std::string_view name;               /**< Header name. */
+  std::string_view value;              /**< Value without surrounding spaces. */
+};
 
 /**
- * @brief A parsed request head. Its strings point into the parsed buffer,
- *        which must outlive it.
+ * @brief A parsed request head. Its views point into the parsed bytes.
  */
-typedef struct{
-  char method[16];                       /**< Method, e.g. "GET". */
-  char target[1024];                     /**< Request target as sent, e.g. "/a%20b.crls". */
-  http_header headers[HTTP_MAX_HEADERS]; /**< Headers in order. */
-  int header_count;                      /**< Number of headers. */
-  bool has_length;                       /**< True if Content-Length was sent. */
-  uint64_t content_length;               /**< Value of Content-Length. */
-  size_t head_length;                    /**< Bytes of the head, including the blank line. */
-}http_request;
+struct http_request{
+  std::string_view method;             /**< Method, e.g. "GET". */
+  std::string_view target;             /**< Request target as sent, e.g. "/a%20b.crls". */
+  std::array<http_header, http_max_headers> headers{}; /**< Headers in order. */
+  std::size_t header_count = 0;        /**< Number of headers. */
+  bool has_length = false;             /**< True if Content-Length was sent. */
+  uint64_t content_length = 0;         /**< Value of Content-Length. */
+  std::size_t head_length = 0;         /**< Bytes of the head, including the blank line. */
+};
+
+/** @brief A byte range, both ends included. */
+struct http_range{
+  uint64_t first = 0;                  /**< First byte. */
+  uint64_t last = 0;                   /**< Last byte. */
+};
+
+/** @brief A parsed Content-Range header. */
+struct http_content_range{
+  uint64_t first = 0;                  /**< First byte. */
+  uint64_t last = 0;                   /**< Last byte (inclusive). */
+  uint64_t total = 0;                  /**< Size of the whole resource. */
+};
 
 /**
- * @brief  Parses the head of a request from the start of buf.
- * @param  buf Received bytes (the body may follow the head).
- * @param  len Number of received bytes.
- * @param  req Output: the request; valid only on HTTP_PARSE_OK.
+ * @brief  Parses the head of a request from the start of bytes.
+ * @param  bytes Received bytes (the body may follow the head).
+ * @param  req   Output: the request; valid only on http_parse::ok.
  * @return Parse result.
  */
-http_parse_result http_parse_request(const char *buf, size_t len, http_request *req);
+http_parse http_parse_request(std::string_view bytes, http_request &req);
 
 /**
- * @brief  Copies the value of a header, matched case-insensitively.
- * @param  req      Parsed request.
- * @param  name     Header name.
- * @param  out      Destination buffer.
- * @param  out_size Capacity of out.
- * @return True if the header exists and fits in out, false otherwise.
+ * @brief  Finds a header, matched case-insensitively.
+ * @param  req  Parsed request.
+ * @param  name Header name.
+ * @return Its value, or std::nullopt if it was not sent.
  */
-bool http_get_header(const http_request *req, const char *name, char *out, size_t out_size);
+std::optional<std::string_view> http_header_value(const http_request &req, std::string_view name);
 
 /**
  * @brief  Decodes the path of a request target ("/name%20x.crls" ->
  *         "name x.crls"). Queries, fragments, NUL bytes and malformed escapes
  *         are rejected.
- * @param  target   Request target, starting with '/'.
- * @param  out      Destination buffer for the decoded path without the
- *                  leading '/'.
- * @param  out_size Capacity of out.
+ * @param  target Request target, starting with '/'.
+ * @param  out    Output: the decoded path without the leading '/'.
  * @return True on success, false otherwise.
  */
-bool http_decode_path(const char *target, char *out, size_t out_size);
+bool http_decode_path(std::string_view target, std::string &out);
 
 /**
  * @brief  Parses a Range header against a resource of size bytes.
  * @param  value Header value, e.g. "bytes=0-99", "bytes=100-" or "bytes=-50".
  * @param  size  Size of the resource.
- * @param  first Output: first byte of the range.
- * @param  last  Output: last byte of the range (inclusive).
- * @return HTTP_RANGE_OK or HTTP_RANGE_INVALID.
+ * @return The range, or std::nullopt if it is malformed, multiple or
+ *         unsatisfiable (416).
  */
-http_range_result http_parse_range(const char *value, uint64_t size, uint64_t *first, uint64_t *last);
+std::optional<http_range> http_parse_range(std::string_view value, uint64_t size);
 
 /**
  * @brief  Parses a Content-Range header of the form "bytes first-last/total".
  * @param  value Header value.
- * @param  first Output: first byte.
- * @param  last  Output: last byte (inclusive).
- * @param  total Output: size of the whole resource.
- * @return True on success, false otherwise.
+ * @return The range, or std::nullopt if it is malformed.
  */
-bool http_parse_content_range(const char *value, uint64_t *first, uint64_t *last, uint64_t *total);
+std::optional<http_content_range> http_parse_content_range(std::string_view value);
 
 /**
  * @brief  Parses a decimal unsigned 64-bit number, rejecting signs, spaces,
  *         empty strings and overflow.
- * @param  s     String.
- * @param  len   Number of characters of s to parse.
- * @param  value Output: the number.
- * @return True on success, false otherwise.
+ * @param  s Digits.
+ * @return The number, or std::nullopt.
  */
-bool http_parse_u64(const char *s, size_t len, uint64_t *value);
+std::optional<uint64_t> http_parse_u64(std::string_view s);
 
 /**
- * @brief Encodes bytes as lowercase hexadecimal.
- * @param data Bytes.
- * @param len  Number of bytes.
- * @param out  Destination buffer of 2 * len + 1 characters.
+ * @brief  Encodes bytes as lowercase hexadecimal.
+ * @param  data Bytes.
+ * @return Two characters per byte.
  */
-void http_hex_encode(const unsigned char *data, size_t len, char *out);
+std::string http_hex_encode(std::span<const unsigned char> data);
 
 /**
- * @brief  Decodes exactly len bytes of hexadecimal.
- * @param  hex Hexadecimal string of exactly 2 * len characters.
- * @param  out Destination buffer of len bytes.
- * @param  len Number of bytes.
+ * @brief  Decodes hexadecimal into exactly out.size() bytes.
+ * @param  hex Hexadecimal string of exactly 2 * out.size() characters.
+ * @param  out Destination bytes.
  * @return True on success, false if hex has another length or invalid digits.
  */
-bool http_hex_decode(const char *hex, unsigned char *out, size_t len);
+bool http_hex_decode(std::string_view hex, std::span<unsigned char> out);
 
 /**
  * @brief  Returns the reason phrase of a status code, e.g. "Not Found".

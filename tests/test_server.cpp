@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <unistd.h>
 #include "core/append.h"
 #include "core/archive.h"
@@ -115,15 +116,13 @@ static int get(const char *method, const char *target, const char *extra, respon
  * @param  out    Destination buffer of 1024 bytes.
  */
 static void post_head(const char *target, const append_upload *up, char *out){
-  char nonce[2*NONCE_BYTES + 1], hash[2*BODY_HASH_BYTES + 1], sig[2*SIGN_BYTES + 1];
-  http_hex_encode(up->claim.index_nonce, NONCE_BYTES, nonce);
-  http_hex_encode(up->claim.body_hash, BODY_HASH_BYTES, hash);
-  http_hex_encode(up->claim.signature, SIGN_BYTES, sig);
+  std::string nonce = http_hex_encode(up->claim.index_nonce), hash = http_hex_encode(up->claim.body_hash);
+  std::string sig = http_hex_encode(up->claim.signature);
   snprintf(out, 1024, "POST %s HTTP/1.1\r\nHost: test\r\nContent-Length: %llu\r\nX-Crls-Base: %llu\r\n"
                       "X-Crls-Index-Nonce: %s\r\nX-Crls-Index-Length: %llu\r\nX-Crls-Body-Hash: %s\r\n"
                       "X-Crls-Sig: %s\r\n\r\n",
            target, (unsigned long long) up->claim.content_length, (unsigned long long) up->claim.base,
-           nonce, (unsigned long long) up->claim.index_length, hash, sig);
+           nonce.c_str(), (unsigned long long) up->claim.index_length, hash.c_str(), sig.c_str());
 }
 
 /**

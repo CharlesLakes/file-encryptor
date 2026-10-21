@@ -1,52 +1,54 @@
 /**
  * @file    test_httpmsg.cpp
- * @brief   Table-driven tests of the strict HTTP/1.1 parser (core/httpmsg.c).
+ * @brief   Table-driven tests of the strict HTTP/1.1 parser (core/httpmsg.cpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include <stdio.h>
-#include <string.h>
+#include <cstdio>
+#include <cstring>
+#include <optional>
+#include <string>
 #include "core/httpmsg.h"
 #include "test_util.h"
 
 using namespace crls;
 
 /** @brief One request head and the expected parse result. */
-typedef struct{
+struct request_case{
   const char *text;                    /**< Raw request head. */
-  http_parse_result expected;          /**< Expected result. */
-}request_case;
+  http_parse expected;                 /**< Expected result. */
+};
 
 static const request_case requests[] = {
-  {"GET /a.crls HTTP/1.1\r\nHost: x\r\n\r\n", HTTP_PARSE_OK},
-  {"HEAD / HTTP/1.0\r\n\r\n", HTTP_PARSE_OK},
-  {"POST /a.crls HTTP/1.1\r\nContent-Length: 10\r\n\r\n", HTTP_PARSE_OK},
-  {"GET /a.crls HTTP/1.1\r\nHost: x\r\n", HTTP_PARSE_INCOMPLETE},
-  {"GET /a.crls HTTP/1.1\r\nHost", HTTP_PARSE_INCOMPLETE},
-  {"GET /a.crls HTTP/2.0\r\n\r\n", HTTP_PARSE_BAD},
-  {"get /a.crls HTTP/1.1\r\n\r\n", HTTP_PARSE_BAD},
-  {"GET  HTTP/1.1\r\n\r\n", HTTP_PARSE_BAD},
-  {"GET /a.crls\r\n\r\n", HTTP_PARSE_BAD},
-  {"GET /a.crls HTTP/1.1\r\nNo colon here\r\n\r\n", HTTP_PARSE_BAD},
-  {"GET /a.crls HTTP/1.1\r\n: empty name\r\n\r\n", HTTP_PARSE_BAD},
-  {"GET /a.crls HTTP/1.1\r\n folded: header\r\n\r\n", HTTP_PARSE_BAD},
-  {"GET /a.crls HTTP/1.1\r\nBad Name: x\r\n\r\n", HTTP_PARSE_BAD},
-  {"POST /a.crls HTTP/1.1\r\nContent-Length: 10\r\nContent-Length: 10\r\n\r\n", HTTP_PARSE_BAD},
-  {"POST /a.crls HTTP/1.1\r\nContent-Length: -1\r\n\r\n", HTTP_PARSE_BAD},
-  {"POST /a.crls HTTP/1.1\r\nContent-Length: 1 0\r\n\r\n", HTTP_PARSE_BAD},
-  {"POST /a.crls HTTP/1.1\r\nContent-Length: 99999999999999999999\r\n\r\n", HTTP_PARSE_BAD},
-  {"POST /a.crls HTTP/1.1\r\nContent-Length: \r\n\r\n", HTTP_PARSE_BAD},
-  {"POST /a.crls HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n", HTTP_PARSE_UNSUPPORTED},
-  {"POST /a.crls HTTP/1.1\r\ntransfer-encoding: chunked\r\nContent-Length: 5\r\n\r\n", HTTP_PARSE_UNSUPPORTED},
+  {"GET /a.crls HTTP/1.1\r\nHost: x\r\n\r\n", http_parse::ok},
+  {"HEAD / HTTP/1.0\r\n\r\n", http_parse::ok},
+  {"POST /a.crls HTTP/1.1\r\nContent-Length: 10\r\n\r\n", http_parse::ok},
+  {"GET /a.crls HTTP/1.1\r\nHost: x\r\n", http_parse::incomplete},
+  {"GET /a.crls HTTP/1.1\r\nHost", http_parse::incomplete},
+  {"GET /a.crls HTTP/2.0\r\n\r\n", http_parse::bad},
+  {"get /a.crls HTTP/1.1\r\n\r\n", http_parse::bad},
+  {"GET  HTTP/1.1\r\n\r\n", http_parse::bad},
+  {"GET /a.crls\r\n\r\n", http_parse::bad},
+  {"GET /a.crls HTTP/1.1\r\nNo colon here\r\n\r\n", http_parse::bad},
+  {"GET /a.crls HTTP/1.1\r\n: empty name\r\n\r\n", http_parse::bad},
+  {"GET /a.crls HTTP/1.1\r\n folded: header\r\n\r\n", http_parse::bad},
+  {"GET /a.crls HTTP/1.1\r\nBad Name: x\r\n\r\n", http_parse::bad},
+  {"POST /a.crls HTTP/1.1\r\nContent-Length: 10\r\nContent-Length: 10\r\n\r\n", http_parse::bad},
+  {"POST /a.crls HTTP/1.1\r\nContent-Length: -1\r\n\r\n", http_parse::bad},
+  {"POST /a.crls HTTP/1.1\r\nContent-Length: 1 0\r\n\r\n", http_parse::bad},
+  {"POST /a.crls HTTP/1.1\r\nContent-Length: 99999999999999999999\r\n\r\n", http_parse::bad},
+  {"POST /a.crls HTTP/1.1\r\nContent-Length: \r\n\r\n", http_parse::bad},
+  {"POST /a.crls HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n", http_parse::unsupported},
+  {"POST /a.crls HTTP/1.1\r\ntransfer-encoding: chunked\r\nContent-Length: 5\r\n\r\n", http_parse::unsupported},
 };
 
 /** @brief A request target and the expected decoded path (NULL = rejected). */
-typedef struct{
+struct path_case{
   const char *target;                  /**< Request target. */
   const char *expected;                /**< Decoded path, or NULL if rejected. */
-}path_case;
+};
 
 static const path_case paths[] = {
   {"/a.crls", "a.crls"},
@@ -62,88 +64,86 @@ static const path_case paths[] = {
 };
 
 /** @brief A Range header and the expected range for a 1000-byte resource. */
-typedef struct{
+struct range_case{
   const char *value;                   /**< Range header value. */
-  http_range_result expected;          /**< Expected result. */
+  bool valid;                          /**< True if the range is satisfiable. */
   uint64_t first, last;                /**< Expected range when valid. */
-}range_case;
-
-static const range_case ranges[] = {
-  {"bytes=0-99", HTTP_RANGE_OK, 0, 99},
-  {"bytes=900-", HTTP_RANGE_OK, 900, 999},
-  {"bytes=-100", HTTP_RANGE_OK, 900, 999},
-  {"bytes=-5000", HTTP_RANGE_OK, 0, 999},
-  {"bytes=990-5000", HTTP_RANGE_OK, 990, 999},
-  {"bytes=1000-1001", HTTP_RANGE_INVALID, 0, 0},
-  {"bytes=5-4", HTTP_RANGE_INVALID, 0, 0},
-  {"bytes=0-1,5-6", HTTP_RANGE_INVALID, 0, 0},
-  {"bytes=-0", HTTP_RANGE_INVALID, 0, 0},
-  {"bytes=a-b", HTTP_RANGE_INVALID, 0, 0},
-  {"items=0-1", HTTP_RANGE_INVALID, 0, 0},
 };
 
-int main(void){
+static const range_case ranges[] = {
+  {"bytes=0-99", true, 0, 99},
+  {"bytes=900-", true, 900, 999},
+  {"bytes=-100", true, 900, 999},
+  {"bytes=-5000", true, 0, 999},
+  {"bytes=990-5000", true, 990, 999},
+  {"bytes=1000-1001", false, 0, 0},
+  {"bytes=5-4", false, 0, 0},
+  {"bytes=0-1,5-6", false, 0, 0},
+  {"bytes=-0", false, 0, 0},
+  {"bytes=a-b", false, 0, 0},
+  {"items=0-1", false, 0, 0},
+};
+
+int main(){
   for(size_t i = 0; i < sizeof(requests) / sizeof(requests[0]); i++){
     http_request req;
-    http_parse_result r = http_parse_request(requests[i].text, strlen(requests[i].text), &req);
+    http_parse r = http_parse_request(requests[i].text, req);
     if(r != requests[i].expected){
-      printf("FAIL request %zu: got %d, expected %d\n", i, (int) r, (int) requests[i].expected);
+      printf("FAIL request %zu: got %d, expected %d\n", i, static_cast<int>(r), static_cast<int>(requests[i].expected));
       failures++;
     }
   }
 
   /* Header lookup, value trimming and the body offset. */
-  const char *text = "POST /x.crls HTTP/1.1\r\nX-Crls-Sig:   abc  \r\nContent-Length: 4\r\n\r\nBODY";
+  std::string_view text = "POST /x.crls HTTP/1.1\r\nX-Crls-Sig:   abc  \r\nContent-Length: 4\r\n\r\nBODY";
   http_request req;
-  char value[64];
-  CHECK(http_parse_request(text, strlen(text), &req) == HTTP_PARSE_OK);
-  CHECK(strcmp(req.method, "POST") == 0 && strcmp(req.target, "/x.crls") == 0);
-  CHECK(http_get_header(&req, "x-crls-sig", value, sizeof(value)) && strcmp(value, "abc") == 0);
+  CHECK(http_parse_request(text, req) == http_parse::ok);
+  CHECK(req.method == "POST" && req.target == "/x.crls");
+  CHECK(http_header_value(req, "x-crls-sig") == std::optional<std::string_view>("abc"));
   CHECK(req.has_length && req.content_length == 4);
-  CHECK(strcmp(text + req.head_length, "BODY") == 0);
-  CHECK(!http_get_header(&req, "Missing", value, sizeof(value)));
+  CHECK(text.substr(req.head_length) == "BODY");
+  CHECK(!http_header_value(req, "Missing"));
 
   /* Limits on line length and header count. */
-  static char big[HTTP_MAX_HEAD + 64];
-  snprintf(big, sizeof(big), "GET /");
-  memset(big + 5, 'a', HTTP_MAX_LINE);
-  big[5 + HTTP_MAX_LINE] = '\0';
-  CHECK(http_parse_request(big, strlen(big), &req) == HTTP_PARSE_TOO_LARGE);
-  size_t n = (size_t) snprintf(big, sizeof(big), "GET / HTTP/1.1\r\n");
-  for(int i = 0; i <= HTTP_MAX_HEADERS; i++) n += (size_t) snprintf(big + n, sizeof(big) - n, "H%d: v\r\n", i);
-  snprintf(big + n, sizeof(big) - n, "\r\n");
-  CHECK(http_parse_request(big, strlen(big), &req) == HTTP_PARSE_TOO_LARGE);
+  std::string big = "GET /" + std::string(http_max_line, 'a');
+  CHECK(http_parse_request(big, req) == http_parse::too_large);
+  big = "GET / HTTP/1.1\r\n";
+  for(size_t i = 0; i <= http_max_headers; i++) big += "H" + std::to_string(i) + ": v\r\n";
+  big += "\r\n";
+  CHECK(http_parse_request(big, req) == http_parse::too_large);
 
   for(size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++){
-    char out[256];
-    bool ok = http_decode_path(paths[i].target, out, sizeof(out));
-    if(ok != (paths[i].expected != NULL) || (ok && strcmp(out, paths[i].expected) != 0)){
+    std::string out;
+    bool ok = http_decode_path(paths[i].target, out);
+    if(ok != (paths[i].expected != NULL) || (ok && out != paths[i].expected)){
       printf("FAIL path %s\n", paths[i].target);
       failures++;
     }
   }
 
   for(size_t i = 0; i < sizeof(ranges) / sizeof(ranges[0]); i++){
-    uint64_t first = 0, last = 0;
-    http_range_result r = http_parse_range(ranges[i].value, 1000, &first, &last);
-    if(r != ranges[i].expected || (r == HTTP_RANGE_OK && (first != ranges[i].first || last != ranges[i].last))){
+    std::optional<http_range> r = http_parse_range(ranges[i].value, 1000);
+    if(r.has_value() != ranges[i].valid || (r && (r->first != ranges[i].first || r->last != ranges[i].last))){
       printf("FAIL range %s\n", ranges[i].value);
       failures++;
     }
   }
 
-  uint64_t first, last, total;
-  CHECK(http_parse_content_range("bytes 0-99/1000", &first, &last, &total) && first == 0 && last == 99 && total == 1000);
-  CHECK(!http_parse_content_range("bytes 0-1000/1000", &first, &last, &total));
-  CHECK(!http_parse_content_range("bytes */1000", &first, &last, &total));
+  std::optional<http_content_range> range = http_parse_content_range("bytes 0-99/1000");
+  CHECK(range && range->first == 0 && range->last == 99 && range->total == 1000);
+  CHECK(!http_parse_content_range("bytes 0-1000/1000"));
+  CHECK(!http_parse_content_range("bytes */1000"));
 
-  unsigned char bytes[3] = {0x00, 0xab, 0xff}, back[3];
-  char hex[7];
-  http_hex_encode(bytes, 3, hex);
-  CHECK(strcmp(hex, "00abff") == 0);
-  CHECK(http_hex_decode("00ABff", back, 3) && memcmp(back, bytes, 3) == 0);
-  CHECK(!http_hex_decode("00abf", back, 3));
-  CHECK(!http_hex_decode("00abfg", back, 3));
+  const unsigned char bytes[3] = {0x00, 0xab, 0xff};
+  unsigned char back[3];
+  CHECK(http_hex_encode(bytes) == "00abff");
+  CHECK(http_hex_decode("00ABff", back) && memcmp(back, bytes, 3) == 0);
+  CHECK(!http_hex_decode("00abf", back));
+  CHECK(!http_hex_decode("00abfg", back));
+
+  CHECK(http_parse_u64("18446744073709551615") == UINT64_MAX);
+  CHECK(!http_parse_u64("18446744073709551616"));
+  CHECK(!http_parse_u64("") && !http_parse_u64("+1") && !http_parse_u64(" 1"));
 
   return test_summary();
 }

@@ -12,7 +12,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <time.h>
 #include <unistd.h>
 #include "core/append.h"
@@ -113,9 +115,8 @@ static bool make_etag(int fd, char *out, size_t out_size){
  * @return True if there is no If-Match or it matches.
  */
 static bool if_match_ok(const http_request *req, const char *etag){
-  char value[128];
-  if(!http_get_header(req, "If-Match", value, sizeof(value))) return true;
-  return strcmp(value, "*") == 0 || strcmp(value, etag) == 0;
+  std::optional<std::string_view> value = http_header_value(*req, "If-Match");
+  return !value || *value == "*" || *value == etag;
 }
 
 /* ---------------- GET and HEAD ---------------- */
@@ -164,7 +165,7 @@ static int serve_listing(const server_config *cfg, net_socket s, bool head_only)
  */
 static int serve_archive(const server_config *cfg, net_socket s, const http_request *req,
                          const char *name, bool head_only){
-  char path[PATH_MAX], etag[80], range[128], extra[512];
+  char path[PATH_MAX], etag[80], extra[512];
   join_path(path, sizeof(path), cfg->dir, name);
   unique_fd fd = fs_open_regular(path, false);
   if(!fd) return send_error(s, 404, "", head_only);
@@ -177,11 +178,14 @@ static int serve_archive(const server_config *cfg, net_socket s, const http_requ
 
   uint64_t size = file_size(fd.get()), first = 0, last = size ? size - 1 : 0;
   int status = 200;
-  if(http_get_header(req, "Range", range, sizeof(range))){
-    if(http_parse_range(range, size, &first, &last) != HTTP_RANGE_OK){
+  if(std::optional<std::string_view> range_header = http_header_value(*req, "Range")){
+    std::optional<http_range> range = http_parse_range(*range_header, size);
+    if(!range){
       snprintf(extra, sizeof(extra), "Content-Range: bytes */%llu\r\n", (unsigned long long) size);
       return send_error(s, 416, extra, head_only);
     }
+    first = range->first;
+    last = range->last;
     status = 206;
   }
   uint64_t length = size ? last - first + 1 : 0;
@@ -238,19 +242,20 @@ static bool body_reader(void *ctx, void *buf, size_t len){
  * @return True if every header is present and well formed.
  */
 static bool read_claim(const http_request *req, append_claim *c){
-  char value[256];
-  memset(c, 0, sizeof(*c));
+  *c = append_claim();
   c->content_length = req->content_length;
-  return http_get_header(req, "X-Crls-Base", value, sizeof(value)) &&
-         http_parse_u64(value, strlen(value), &c->base) &&
-         http_get_header(req, "X-Crls-Index-Length", value, sizeof(value)) &&
-         http_parse_u64(value, strlen(value), &c->index_length) &&
-         http_get_header(req, "X-Crls-Index-Nonce", value, sizeof(value)) &&
-         http_hex_decode(value, c->index_nonce, NONCE_BYTES) &&
-         http_get_header(req, "X-Crls-Body-Hash", value, sizeof(value)) &&
-         http_hex_decode(value, c->body_hash, BODY_HASH_BYTES) &&
-         http_get_header(req, "X-Crls-Sig", value, sizeof(value)) &&
-         http_hex_decode(value, c->signature, SIGN_BYTES);
+  std::optional<std::string_view> base = http_header_value(*req, "X-Crls-Base");
+  std::optional<std::string_view> index_length = http_header_value(*req, "X-Crls-Index-Length");
+  std::optional<std::string_view> nonce = http_header_value(*req, "X-Crls-Index-Nonce");
+  std::optional<std::string_view> hash = http_header_value(*req, "X-Crls-Body-Hash");
+  std::optional<std::string_view> sig = http_header_value(*req, "X-Crls-Sig");
+  if(!base || !index_length || !nonce || !hash || !sig) return false;
+  std::optional<uint64_t> base_value = http_parse_u64(*base), index_value = http_parse_u64(*index_length);
+  if(!base_value || !index_value) return false;
+  c->base = *base_value;
+  c->index_length = *index_value;
+  return http_hex_decode(*nonce, c->index_nonce) && http_hex_decode(*hash, c->body_hash) &&
+         http_hex_decode(*sig, c->signature);
 }
 
 /**
@@ -304,8 +309,7 @@ static int serve_append(const server_config *cfg, net_socket s, const http_reque
   append_result r = append_load_state(fd.get(), &st);
   if(r == APPEND_OK) r = append_check(&st, &claim, cfg->max_upload);
   if(r == APPEND_OK){
-    char expect[64];
-    if(http_get_header(req, "Expect", expect, sizeof(expect)) && strcmp(expect, "100-continue") == 0)
+    if(http_header_value(*req, "Expect") == std::optional<std::string_view>("100-continue"))
       net_send_all(s, "HTTP/1.1 100 Continue\r\n\r\n", 25);
     body_ctx ctx = {s, pending, pending_len,
                     time(NULL) + cfg->timeout + (time_t) (claim.content_length / MIN_BODY_RATE)};
@@ -325,41 +329,41 @@ static int serve_append(const server_config *cfg, net_socket s, const http_reque
  * @return Status code, or 0 if nothing could be answered.
  */
 static int handle_connection(const server_config *cfg, net_socket s, char *method, char *target){
-  static char head[HTTP_MAX_HEAD];
+  static char head[http_max_head];
   http_request req;
-  http_parse_result parsed = HTTP_PARSE_INCOMPLETE;
+  http_parse parsed = http_parse::incomplete;
   size_t len = 0;
   time_t deadline = time(NULL) + cfg->timeout;
 
-  while(parsed == HTTP_PARSE_INCOMPLETE){
+  while(parsed == http_parse::incomplete){
     if(len == sizeof(head)){
-      parsed = HTTP_PARSE_TOO_LARGE;
+      parsed = http_parse::too_large;
       break;
     }
     long n = net_recv(s, head + len, sizeof(head) - len);
     if(n <= 0 || time(NULL) > deadline) return len ? send_error(s, 408, "", false) : 0;
     len += (size_t) n;
-    parsed = http_parse_request(head, len, &req);
+    parsed = http_parse_request(std::string_view(head, len), req);
   }
-  if(parsed == HTTP_PARSE_TOO_LARGE) return send_error(s, 431, "", false);
-  if(parsed == HTTP_PARSE_UNSUPPORTED) return send_error(s, 501, "", false);
-  if(parsed != HTTP_PARSE_OK) return send_error(s, 400, "", false);
-  snprintf(method, 16, "%s", req.method);
-  snprintf(target, 256, "%.255s", req.target);   /* Truncated for the log. */
+  if(parsed == http_parse::too_large) return send_error(s, 431, "", false);
+  if(parsed == http_parse::unsupported) return send_error(s, 501, "", false);
+  if(parsed != http_parse::ok) return send_error(s, 400, "", false);
+  /* The target is truncated for the log. */
+  snprintf(method, 16, "%.*s", static_cast<int>(req.method.size()), req.method.data());
+  snprintf(target, 256, "%.*s", static_cast<int>(req.target.size() < 255 ? req.target.size() : 255), req.target.data());
 
-  bool get = strcmp(req.method, "GET") == 0, head_only = strcmp(req.method, "HEAD") == 0;
-  bool post = strcmp(req.method, "POST") == 0;
+  bool get = req.method == "GET", head_only = req.method == "HEAD", post = req.method == "POST";
   if(!get && !head_only && !post) return send_error(s, 405, "Allow: GET, HEAD, POST\r\n", false);
 
-  char name[1024];
-  if(!http_decode_path(req.target, name, sizeof(name))) return send_error(s, 400, "", head_only);
-  if(name[0] == '\0'){
+  std::string name;
+  if(!http_decode_path(req.target, name)) return send_error(s, 400, "", head_only);
+  if(name.empty()){
     if(post) return send_error(s, 405, "Allow: GET, HEAD\r\n", false);
     return serve_listing(cfg, s, head_only);
   }
-  if(!valid_archive_name(name)) return send_error(s, 404, "", head_only);
-  if(post) return serve_append(cfg, s, &req, name, head + req.head_length, len - req.head_length);
-  return serve_archive(cfg, s, &req, name, head_only);
+  if(!valid_archive_name(name.c_str())) return send_error(s, 404, "", head_only);
+  if(post) return serve_append(cfg, s, &req, name.c_str(), head + req.head_length, len - req.head_length);
+  return serve_archive(cfg, s, &req, name.c_str(), head_only);
 }
 
 int server_run(const server_config *cfg){
@@ -422,8 +426,9 @@ int server_main(int argc, char **argv){
   /* Every option takes a value: they come in pairs. */
   for(int i = 2; i < argc; i += 2){
     const char *opt = argv[i], *value = i + 1 < argc ? argv[i + 1] : NULL;
-    uint64_t number;
-    bool numeric = value && http_parse_u64(value, strlen(value), &number);
+    std::optional<uint64_t> parsed = value ? http_parse_u64(value) : std::nullopt;
+    bool numeric = parsed.has_value();
+    uint64_t number = parsed.value_or(0);
     if(strcmp(opt, "--port") == 0 && numeric && number <= 65535) cfg.port = (int) number;
     else if(strcmp(opt, "--bind") == 0 && value) cfg.bind = value;
     else if(strcmp(opt, "--max-upload") == 0 && numeric) cfg.max_upload = number;
