@@ -41,7 +41,7 @@ static struct{
 }w32;
 
 /** @brief Name of the registered window class. */
-static const char CLASS_NAME[] = "FileEncrypterWindow";
+static const char CLASS_NAME[] = "FileEncryptorWindow";
 
 /**
  * @brief  Converts a 0xRRGGBB color into a GDI COLORREF (0x00BBGGRR).
@@ -298,7 +298,7 @@ void platform_close(void){
 }
 
 void platform_error(const char *message){
-  MessageBoxA(NULL, message, "FileEncrypter", MB_OK | MB_ICONERROR);
+  MessageBoxA(NULL, message, "FileEncryptor", MB_OK | MB_ICONERROR);
 }
 
 void platform_next_event(ui_event *event){

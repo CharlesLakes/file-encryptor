@@ -40,10 +40,10 @@ static char dir[PATH_MAX];
 static bool make_temp_dir(void){
 #ifdef _WIN32
   const char *base = getenv("TEMP");
-  snprintf(dir, sizeof(dir), "%s\\file-encrypter-test-XXXXXX", base ? base : ".");
+  snprintf(dir, sizeof(dir), "%s\\file-encryptor-test-XXXXXX", base ? base : ".");
   return _mktemp(dir) != NULL && make_dir(dir) == 0;
 #else
-  snprintf(dir, sizeof(dir), "/tmp/file-encrypter-test-XXXXXX");
+  snprintf(dir, sizeof(dir), "/tmp/file-encryptor-test-XXXXXX");
   return mkdtemp(dir) != NULL;
 #endif
 }

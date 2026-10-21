@@ -1,6 +1,6 @@
-# FileEncrypter build.
+# FileEncryptor build.
 #
-#   make          build build/file-encrypter (build/file-encrypter.exe on Windows)
+#   make          build build/file-encryptor (build/file-encryptor.exe on Windows)
 #   make run      build and start the GUI
 #   make test     build and run the core tests (no display needed)
 #   make clean    remove build/
@@ -44,7 +44,7 @@ else
 endif
 
 BUILD   = build
-BIN     = $(BUILD)/file-encrypter$(EXE)
+BIN     = $(BUILD)/file-encryptor$(EXE)
 TEST    = $(BUILD)/test-archive$(EXE)
 
 # Everything except the GUI: shared by the program and the tests.

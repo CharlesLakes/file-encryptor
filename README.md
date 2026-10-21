@@ -1,4 +1,4 @@
-# FileEncrypter
+# FileEncryptor
 
 A small desktop app, written in C, that keeps files inside an encrypted,
 password-protected archive with the `.crls` extension.
@@ -20,7 +20,7 @@ come with most Linux desktops (on Debian/Ubuntu they are the packages `libx11-6`
 and `libsodium23`).
 
 ```sh
-make          # builds build/file-encrypter
+make          # builds build/file-encryptor
 make run      # builds and starts the GUI
 make test     # core tests (no display needed)
 make clean
@@ -32,13 +32,13 @@ Install [MSYS2](https://www.msys2.org/), open the **UCRT64** shell and run:
 
 ```sh
 pacman -S --needed make mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-libsodium
-make          # builds build/file-encrypter.exe (PLATFORM=win32 is picked automatically)
+make          # builds build/file-encryptor.exe (PLATFORM=win32 is picked automatically)
 make run
 make test
 ```
 
 To run the program outside the MSYS2 shell, copy `libsodium-26.dll` from
-`C:\msys64\ucrt64\bin` next to `file-encrypter.exe`.
+`C:\msys64\ucrt64\bin` next to `file-encryptor.exe`.
 
 To cross-compile from Linux with MinGW-w64, use the
 [prebuilt libsodium for MinGW](https://download.libsodium.org/libsodium/releases/):
