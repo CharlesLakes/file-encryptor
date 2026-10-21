@@ -425,7 +425,8 @@ int server_main(int argc, char **argv){
   }
   cfg.dir = dir;
 
-  for(int i = 2; i < argc; i++){
+  /* Every option takes a value: they come in pairs. */
+  for(int i = 2; i < argc; i += 2){
     const char *opt = argv[i], *value = i + 1 < argc ? argv[i + 1] : NULL;
     uint64_t number;
     bool numeric = value && http_parse_u64(value, strlen(value), &number);
@@ -438,7 +439,6 @@ int server_main(int argc, char **argv){
       server_usage();
       return 2;
     }
-    i++;
   }
   return server_run(&cfg);
 }
