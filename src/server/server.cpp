@@ -1,12 +1,12 @@
 /**
  * @file    server.cpp
- * @brief   Implementation of the .crls HTTP server (see server.h).
+ * @brief   Implementation of the .crls HTTP server (see server.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "server/server.h"
+#include "server/server.hpp"
 
 #include <algorithm>
 #include <array>
@@ -16,14 +16,14 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include "core/append.h"
-#include "core/archive.h"
-#include "core/browser.h"
-#include "core/fs.h"
-#include "core/httpmsg.h"
-#include "core/net.h"
-#include "core/util.h"
-#include "lib/heap_buffer.h"
+#include "core/append.hpp"
+#include "core/archive.hpp"
+#include "core/browser.hpp"
+#include "core/fs.hpp"
+#include "core/httpmsg.hpp"
+#include "core/net.hpp"
+#include "core/util.hpp"
+#include "lib/heap_buffer.hpp"
 
 namespace crls{
 
@@ -271,7 +271,7 @@ static int append_status(append_result r){
 }
 
 /**
- * @brief  Answers a signed append (see core/append.h). The signature is
+ * @brief  Answers a signed append (see core/append.hpp). The signature is
  *         checked before any byte of the body is read.
  * @param  cfg     Settings.
  * @param  s       Socket.

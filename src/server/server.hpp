@@ -1,5 +1,5 @@
 /**
- * @file    server.h
+ * @file    server.hpp
  * @brief   HTTP server that publishes a folder of .crls archives.
  * @author  @CharlesLakes
  *
@@ -9,7 +9,7 @@
  *
  * Started with `file-encryptor --server <folder>`. The server never sees a
  * password or a key: it serves the encrypted bytes as they are and accepts
- * signed appends (see core/append.h).
+ * signed appends (see core/append.hpp).
  *
  * | Request            | Response                                            |
  * |--------------------|-----------------------------------------------------|
@@ -46,8 +46,8 @@
  * such as Caddy or nginx in front of it for HTTPS.
  */
 
-#ifndef SERVER_SERVER_H
-#define SERVER_SERVER_H
+#ifndef SERVER_SERVER_HPP
+#define SERVER_SERVER_HPP
 
 #include <atomic>
 #include <cstdint>

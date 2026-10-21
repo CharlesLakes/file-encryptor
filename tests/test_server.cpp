@@ -6,7 +6,7 @@
  *
  * Maintainer: @CharlesLakes
  *
- * The server runs in a second thread of this process (see server_fixture.h).
+ * The server runs in a second thread of this process (see server_fixture.hpp).
  * The only argument is the folder holding tests/fixtures/v2.crls.
  */
 
@@ -19,14 +19,14 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include "core/append.h"
-#include "core/archive.h"
-#include "core/fs.h"
-#include "core/httpmsg.h"
-#include "core/net.h"
-#include "core/util.h"
-#include "server_fixture.h"
-#include "test_util.h"
+#include "core/append.hpp"
+#include "core/archive.hpp"
+#include "core/fs.hpp"
+#include "core/httpmsg.hpp"
+#include "core/net.hpp"
+#include "core/util.hpp"
+#include "server_fixture.hpp"
+#include "test_util.hpp"
 
 using namespace crls;
 

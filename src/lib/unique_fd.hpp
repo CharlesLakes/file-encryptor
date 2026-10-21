@@ -1,5 +1,5 @@
 /**
- * @file    unique_fd.h
+ * @file    unique_fd.hpp
  * @brief   Owning wrapper of a file descriptor that closes it on destruction.
  * @author  @CharlesLakes
  *
@@ -17,8 +17,8 @@
  * closing.
  */
 
-#ifndef LIB_UNIQUE_FD_H
-#define LIB_UNIQUE_FD_H
+#ifndef LIB_UNIQUE_FD_HPP
+#define LIB_UNIQUE_FD_HPP
 
 #include <unistd.h>
 

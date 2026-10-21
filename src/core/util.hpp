@@ -1,7 +1,7 @@
 /**
- * @file    util.h
+ * @file    util.hpp
  * @brief   General-purpose helpers, independent of the .crls format, the UI and
- *          the operating system (see fs.h for the latter).
+ *          the operating system (see fs.hpp for the latter).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
@@ -16,8 +16,8 @@
  * - format_size() and join_path() for text shown to the user.
  */
 
-#ifndef CORE_UTIL_H
-#define CORE_UTIL_H
+#ifndef CORE_UTIL_HPP
+#define CORE_UTIL_HPP
 
 #include <algorithm>
 #include <concepts>

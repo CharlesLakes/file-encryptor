@@ -1,5 +1,5 @@
 /**
- * @file    test_util.h
+ * @file    test_util.hpp
  * @brief   Helpers shared by the tests: checks, a temporary folder and files
  *          with known contents.
  * @author  @CharlesLakes
@@ -7,8 +7,8 @@
  * Maintainer: @CharlesLakes
  */
 
-#ifndef TESTS_TEST_UTIL_H
-#define TESTS_TEST_UTIL_H
+#ifndef TESTS_TEST_UTIL_HPP
+#define TESTS_TEST_UTIL_HPP
 
 #include <cstddef>
 #include <cstdint>
@@ -19,8 +19,8 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
-#include "core/append.h"
-#include "core/archive.h"
+#include "core/append.hpp"
+#include "core/archive.hpp"
 
 /**
  * @brief Records a failed check: prints where it happened, the message and the

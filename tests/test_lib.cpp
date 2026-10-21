@@ -15,13 +15,13 @@
 #include <type_traits>
 #include <utility>
 #include <fcntl.h>
-#include "core/archive.h"
-#include "core/fs.h"
-#include "lib/function_ref.h"
-#include "lib/heap_buffer.h"
-#include "lib/secret.h"
-#include "lib/unique_fd.h"
-#include "test_util.h"
+#include "core/archive.hpp"
+#include "core/fs.hpp"
+#include "lib/function_ref.hpp"
+#include "lib/heap_buffer.hpp"
+#include "lib/secret.hpp"
+#include "lib/unique_fd.hpp"
+#include "test_util.hpp"
 
 using namespace crls;
 

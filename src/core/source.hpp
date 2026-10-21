@@ -1,5 +1,5 @@
 /**
- * @file    source.h
+ * @file    source.hpp
  * @brief   Read-only byte source behind an archive: a local file or a remote URL.
  * @author  @CharlesLakes
  *
@@ -11,11 +11,11 @@
  * byte_source, so the same code serves local archives (fd_source) and archives
  * fetched over HTTP (remote_source, see remote.cpp). Writing is not part of
  * this interface: local archives write through their file descriptor and
- * remote archives upload appends (see append.h).
+ * remote archives upload appends (see append.hpp).
  */
 
-#ifndef CORE_SOURCE_H
-#define CORE_SOURCE_H
+#ifndef CORE_SOURCE_HPP
+#define CORE_SOURCE_HPP
 
 #include <cstddef>
 #include <cstdint>

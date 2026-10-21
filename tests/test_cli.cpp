@@ -13,13 +13,13 @@
 #include <array>
 #include <cstdio>
 #include <string>
-#include "cli/cli.h"
-#include "core/archive.h"
-#include "core/remote.h"
-#include "core/status.h"
-#include "core/util.h"
-#include "server_fixture.h"
-#include "test_util.h"
+#include "cli/cli.hpp"
+#include "core/archive.hpp"
+#include "core/remote.hpp"
+#include "core/status.hpp"
+#include "core/util.hpp"
+#include "server_fixture.hpp"
+#include "test_util.hpp"
 
 using namespace crls;
 

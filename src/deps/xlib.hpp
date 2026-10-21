@@ -1,5 +1,5 @@
 /**
- * @file    xlib.h
+ * @file    xlib.hpp
  * @brief   Minimal hand-written Xlib declarations.
  * @author  @CharlesLakes
  *
@@ -13,8 +13,8 @@
  * <X11/Xlib.h> on 64-bit Linux.
  */
 
-#ifndef DEPS_XLIB_H
-#define DEPS_XLIB_H
+#ifndef DEPS_XLIB_HPP
+#define DEPS_XLIB_HPP
 
 /* The library is written in C: its symbols are not mangled. */
 extern "C"{

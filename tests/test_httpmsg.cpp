@@ -12,8 +12,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include "core/httpmsg.h"
-#include "test_util.h"
+#include "core/httpmsg.hpp"
+#include "test_util.hpp"
 
 using namespace crls;
 

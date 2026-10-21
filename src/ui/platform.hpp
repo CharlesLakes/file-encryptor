@@ -1,5 +1,5 @@
 /**
- * @file    platform.h
+ * @file    platform.hpp
  * @brief   Windowing system abstraction: window, events, drawing and fonts.
  * @author  @CharlesLakes
  *
@@ -21,11 +21,11 @@
  * the window when it is resized (ui_event_type::resize). Colors are 0xRRGGBB values.
  */
 
-#ifndef UI_PLATFORM_H
-#define UI_PLATFORM_H
+#ifndef UI_PLATFORM_HPP
+#define UI_PLATFORM_HPP
 
 #include <string_view>
-#include "lib/function_ref.h"
+#include "lib/function_ref.hpp"
 
 namespace crls{
 

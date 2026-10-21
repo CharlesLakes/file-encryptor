@@ -1,5 +1,5 @@
 /**
- * @file    fs.h
+ * @file    fs.hpp
  * @brief   Operating system abstraction for files and paths.
  * @author  @CharlesLakes
  *
@@ -20,8 +20,8 @@
  * include O_BINARY, which is defined as 0 on systems that do not need it.
  */
 
-#ifndef CORE_FS_H
-#define CORE_FS_H
+#ifndef CORE_FS_HPP
+#define CORE_FS_HPP
 
 #include <cstddef>
 #include <cstdint>
@@ -30,7 +30,7 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include "lib/unique_fd.h"
+#include "lib/unique_fd.hpp"
 
 /* A macro, because it is combined with the O_* flags of <fcntl.h>. */
 #ifndef O_BINARY

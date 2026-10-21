@@ -1,6 +1,6 @@
 /**
  * @file    net_win32.cpp
- * @brief   Winsock implementation of the socket abstraction (see net.h).
+ * @brief   Winsock implementation of the socket abstraction (see net.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
@@ -9,13 +9,13 @@
  * let another process bind the same port and steal connections.
  */
 
-#include "core/net.h"
+#include "core/net.hpp"
 
 #include <algorithm>
 #include <memory>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include "lib/function_ref.h"
+#include "lib/function_ref.hpp"
 
 namespace crls{
 

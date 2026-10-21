@@ -1,5 +1,5 @@
 /**
- * @file    remote.h
+ * @file    remote.hpp
  * @brief   Archives published at an http or https URL: reading with Range
  *          requests and adding files with signed uploads.
  * @author  @CharlesLakes
@@ -9,9 +9,9 @@
  * @section remote_overview Overview
  *
  * An archive at a URL is read through an archive_source that fetches byte
- * ranges (see http.h), so opening it downloads only the header and the index,
+ * ranges (see http.hpp), so opening it downloads only the header and the index,
  * and extracting a file downloads only that file. Any server that supports
- * single Range requests works: the built-in server (server/server.h), nginx,
+ * single Range requests works: the built-in server (server/server.hpp), nginx,
  * Apache, object storage and so on. Uploading needs the built-in server.
  *
  * Every request after the first one carries If-Match with the ETag of the
@@ -23,13 +23,13 @@
  * signed with the key derived from it.
  */
 
-#ifndef CORE_REMOTE_H
-#define CORE_REMOTE_H
+#ifndef CORE_REMOTE_HPP
+#define CORE_REMOTE_HPP
 
 #include <cstddef>
 #include <string>
 #include <string_view>
-#include "core/archive.h"
+#include "core/archive.hpp"
 
 namespace crls{
 

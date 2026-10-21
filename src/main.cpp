@@ -6,8 +6,8 @@
  * | Command                                  | Mode                          |
  * |------------------------------------------|-------------------------------|
  * | file-encryptor                           | GUI                           |
- * | file-encryptor --server <folder> [...]   | HTTP server (server/server.h) |
- * | file-encryptor --upload <url> <file>...  | Upload client (cli/cli.h)     |
+ * | file-encryptor --server <folder> [...]   | HTTP server (server/server.hpp) |
+ * | file-encryptor --upload <url> <file>...  | Upload client (cli/cli.hpp)     |
  *
  * On Windows the GUI executable has no console, so the command-line modes are
  * meant to be run with file-encryptor-cli.exe, which is the same program built
@@ -16,16 +16,16 @@
  *
  * Maintainer: @CharlesLakes
  *
- * Refer to README.md for the module overview and to ui/ui.h for the event flow.
+ * Refer to README.md for the module overview and to ui/ui.hpp for the event flow.
  */
 
 #include <cstdio>
 #include <span>
 #include <string_view>
-#include "cli/cli.h"
-#include "core/archive.h"
-#include "server/server.h"
-#include "ui/ui.h"
+#include "cli/cli.hpp"
+#include "core/archive.hpp"
+#include "server/server.hpp"
+#include "ui/ui.hpp"
 
 using namespace crls;
 

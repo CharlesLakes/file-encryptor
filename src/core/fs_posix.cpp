@@ -1,12 +1,12 @@
 /**
  * @file    fs_posix.cpp
- * @brief   POSIX implementation of the file system abstraction (see fs.h).
+ * @brief   POSIX implementation of the file system abstraction (see fs.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "core/fs.h"
+#include "core/fs.hpp"
 
 #include <array>
 #include <charconv>

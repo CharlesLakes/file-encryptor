@@ -1,5 +1,5 @@
 /**
- * @file    browser.h
+ * @file    browser.hpp
  * @brief   Directory browser: filtered and sorted listing of a single folder.
  * @author  @CharlesLakes
  *
@@ -13,8 +13,8 @@
  * case-insensitively. Hidden entries (names starting with '.') are omitted.
  */
 
-#ifndef CORE_BROWSER_H
-#define CORE_BROWSER_H
+#ifndef CORE_BROWSER_HPP
+#define CORE_BROWSER_HPP
 
 #include <string>
 #include <vector>

@@ -1,12 +1,12 @@
 /**
  * @file    status.cpp
- * @brief   Implementation of the status line (see status.h).
+ * @brief   Implementation of the status line (see status.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "core/status.h"
+#include "core/status.hpp"
 
 #include <array>
 #include <cstdarg>

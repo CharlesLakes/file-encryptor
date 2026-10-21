@@ -1,12 +1,12 @@
 /**
  * @file    browser.cpp
- * @brief   Implementation of the directory browser (see browser.h).
+ * @brief   Implementation of the directory browser (see browser.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "core/browser.h"
+#include "core/browser.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -15,10 +15,10 @@
 #include <string>
 #include <dirent.h>
 #include <sys/stat.h>
-#include "core/archive.h"
-#include "core/fs.h"
-#include "core/status.h"
-#include "core/util.h"
+#include "core/archive.hpp"
+#include "core/fs.hpp"
+#include "core/status.hpp"
+#include "core/util.hpp"
 
 namespace crls{
 

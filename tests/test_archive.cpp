@@ -15,10 +15,10 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
-#include "core/archive.h"
-#include "core/fs.h"
-#include "core/util.h"
-#include "test_util.h"
+#include "core/archive.hpp"
+#include "core/fs.hpp"
+#include "core/util.hpp"
+#include "test_util.hpp"
 
 using namespace crls;
 

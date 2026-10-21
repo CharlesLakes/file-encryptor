@@ -1,23 +1,23 @@
 /**
  * @file    http_curl.cpp
- * @brief   libcurl implementation of the HTTP abstraction (see http.h).
+ * @brief   libcurl implementation of the HTTP abstraction (see http.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  *
- * libcurl is loaded on first use; see deps/curl.h for why it is not linked and
+ * libcurl is loaded on first use; see deps/curl.hpp for why it is not linked and
  * why every option goes through a typed wrapper.
  */
 
-#include "core/http.h"
+#include "core/http.hpp"
 
 #include <algorithm>
 #include <array>
 #include <memory>
 #include <dlfcn.h>
-#include "core/fs.h"
-#include "core/util.h"
-#include "deps/curl.h"
+#include "core/fs.hpp"
+#include "core/util.hpp"
+#include "deps/curl.hpp"
 
 namespace crls{
 

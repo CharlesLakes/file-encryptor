@@ -1,16 +1,16 @@
 /**
  * @file    util.cpp
- * @brief   Implementation of the general-purpose helpers (see util.h).
+ * @brief   Implementation of the general-purpose helpers (see util.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "core/util.h"
+#include "core/util.hpp"
 
 #include <array>
 #include <charconv>
-#include "core/fs.h"
+#include "core/fs.hpp"
 
 namespace crls{
 

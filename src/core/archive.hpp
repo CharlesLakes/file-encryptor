@@ -1,5 +1,5 @@
 /**
- * @file    archive.h
+ * @file    archive.hpp
  * @brief   Encrypted .crls archive: open, create, add, extract, delete and compact.
  * @author  @CharlesLakes
  *
@@ -9,7 +9,7 @@
  *
  * This module is independent of the user interface. Every operation that may
  * fail returns false (or extract_result::failed) and records a descriptive
- * message in the status line (see status.h) before returning; nothing throws.
+ * message in the status line (see status.hpp) before returning; nothing throws.
  *
  * @section archive_format File Format (version 3)
  *
@@ -40,7 +40,7 @@
  * "CRLS_v3_"): subkey 1 encrypts the contents and the index, and subkey 2 is
  * the seed of the Ed25519 key pair whose public half is stored in the header.
  * A server can therefore check that an upload was made by someone who knows
- * the password without ever learning it (see append.h). Version 2 uses the
+ * the password without ever learning it (see append.hpp). Version 2 uses the
  * master key directly for encryption and has no key pair.
  *
  * Each file is encrypted independently with the secretstream construction
@@ -68,8 +68,8 @@
  * compacted.
  */
 
-#ifndef CORE_ARCHIVE_H
-#define CORE_ARCHIVE_H
+#ifndef CORE_ARCHIVE_HPP
+#define CORE_ARCHIVE_HPP
 
 #include <algorithm>
 #include <array>
@@ -81,10 +81,10 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include "core/source.h"
-#include "lib/heap_buffer.h"
-#include "lib/secret.h"
-#include "lib/unique_fd.h"
+#include "core/source.hpp"
+#include "lib/heap_buffer.hpp"
+#include "lib/secret.hpp"
+#include "lib/unique_fd.hpp"
 
 namespace crls{
 
@@ -159,8 +159,8 @@ public:
   [[nodiscard]] bool open(const std::string &path, const char *password);
 
   /**
-   * @brief  Opens an archive from a byte source (used for URLs, see remote.h).
-   *         Files are added to it with signed uploads (see append.h).
+   * @brief  Opens an archive from a byte source (used for URLs, see remote.hpp).
+   *         Files are added to it with signed uploads (see append.hpp).
    * @param  src      Source of the bytes, owned by the archive from now on.
    * @param  name     Name or URL of the archive, kept as its path.
    * @param  password Password used to derive the key.
@@ -204,7 +204,7 @@ public:
   /** @brief True while an archive is open. */
   bool is_open() const noexcept{ return open_; }
 
-  /** @brief True if it was opened from a URL (see remote.h). */
+  /** @brief True if it was opened from a URL (see remote.hpp). */
   bool is_remote() const noexcept{ return remote_; }
 
   /** @brief Format version of the open archive. */
@@ -289,7 +289,7 @@ public:
   /**
    * @brief  Encrypts the file at path as a new entry named after its basename and
    *         writes its chunks to fd starting at position. The entry is not added
-   *         to the index. Used by add_file() and by uploads (append.h).
+   *         to the index. Used by add_file() and by uploads (append.hpp).
    * @param  path     Path of the file to encrypt.
    * @param  fd       Destination file descriptor.
    * @param  position Destination offset, which becomes the offset of the entry.
@@ -347,7 +347,7 @@ private:
 
 /**
  * @brief  Initializes libsodium and verifies that the sizes declared in
- *         deps/sodium.h match those reported by the library. Must be called
+ *         deps/sodium.hpp match those reported by the library. Must be called
  *         once at startup.
  * @return True on success, false otherwise.
  */

@@ -1,16 +1,16 @@
 /**
  * @file    httpmsg.cpp
- * @brief   Implementation of the HTTP/1.1 helpers (see httpmsg.h).
+ * @brief   Implementation of the HTTP/1.1 helpers (see httpmsg.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "core/httpmsg.h"
+#include "core/httpmsg.hpp"
 
 #include <algorithm>
 #include <charconv>
-#include "core/util.h"
+#include "core/util.hpp"
 
 namespace crls{
 

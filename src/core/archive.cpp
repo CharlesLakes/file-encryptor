@@ -1,12 +1,12 @@
 /**
  * @file    archive.cpp
- * @brief   Implementation of the .crls archive (see archive.h).
+ * @brief   Implementation of the .crls archive (see archive.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "core/archive.h"
+#include "core/archive.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -17,11 +17,11 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include "core/fs.h"
-#include "core/status.h"
-#include "core/util.h"
-#include "deps/sodium.h"
-#include "lib/function_ref.h"
+#include "core/fs.hpp"
+#include "core/status.hpp"
+#include "core/util.hpp"
+#include "deps/sodium.hpp"
+#include "lib/function_ref.hpp"
 
 namespace crls{
 

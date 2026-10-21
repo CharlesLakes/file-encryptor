@@ -1,21 +1,21 @@
 /**
  * @file    test_util.cpp
- * @brief   Implementation of the test helpers (see test_util.h).
+ * @brief   Implementation of the test helpers (see test_util.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "test_util.h"
+#include "test_util.hpp"
 
 #include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <sys/stat.h>
-#include "core/fs.h"
-#include "core/status.h"
-#include "core/util.h"
+#include "core/fs.hpp"
+#include "core/status.hpp"
+#include "core/util.hpp"
 
 #ifdef _WIN32
 #include <direct.h>

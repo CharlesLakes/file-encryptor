@@ -1,5 +1,5 @@
 /**
- * @file    ui.h
+ * @file    ui.hpp
  * @brief   Graphical user interface: shared state, constants and functions.
  * @author  @CharlesLakes
  *
@@ -18,7 +18,7 @@
  *
  * @section ui_flow Event Flow
  *
- * main.cpp receives each event from the platform layer (platform.h), input.cpp
+ * main.cpp receives each event from the platform layer (platform.hpp), input.cpp
  * translates it into an action, actions.cpp executes it (delegating to
  * core/archive.cpp) and draw.cpp repaints the window.
  *
@@ -36,17 +36,17 @@
  * to every function that needs it; there are no UI globals.
  */
 
-#ifndef UI_UI_H
-#define UI_UI_H
+#ifndef UI_UI_HPP
+#define UI_UI_HPP
 
 #include <array>
 #include <span>
 #include <string>
 #include <string_view>
-#include "core/archive.h"
-#include "core/browser.h"
-#include "lib/secret.h"
-#include "ui/platform.h"
+#include "core/archive.hpp"
+#include "core/browser.hpp"
+#include "lib/secret.hpp"
+#include "ui/platform.hpp"
 
 namespace crls{
 

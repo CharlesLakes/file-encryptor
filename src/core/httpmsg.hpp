@@ -1,5 +1,5 @@
 /**
- * @file    httpmsg.h
+ * @file    httpmsg.hpp
  * @brief   Strict HTTP/1.1 message parsing and formatting helpers.
  * @author  @CharlesLakes
  *
@@ -21,8 +21,8 @@
  * outlive them.
  */
 
-#ifndef CORE_HTTPMSG_H
-#define CORE_HTTPMSG_H
+#ifndef CORE_HTTPMSG_HPP
+#define CORE_HTTPMSG_HPP
 
 #include <array>
 #include <cstddef>

@@ -1,5 +1,5 @@
 /**
- * @file    status.h
+ * @file    status.hpp
  * @brief   Status line: the single message displayed at the bottom of the window.
  * @author  @CharlesLakes
  *
@@ -16,8 +16,8 @@
  * allocate memory itself. Longer messages are truncated.
  */
 
-#ifndef CORE_STATUS_H
-#define CORE_STATUS_H
+#ifndef CORE_STATUS_HPP
+#define CORE_STATUS_HPP
 
 namespace crls{
 

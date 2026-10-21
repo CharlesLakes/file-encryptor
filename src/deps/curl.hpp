@@ -1,5 +1,5 @@
 /**
- * @file    curl.h
+ * @file    curl.hpp
  * @brief   Minimal hand-written libcurl declarations, loaded at run time.
  * @author  @CharlesLakes
  *
@@ -24,8 +24,8 @@
  * OFF_T 30000) plus a fixed index.
  */
 
-#ifndef DEPS_CURL_H
-#define DEPS_CURL_H
+#ifndef DEPS_CURL_HPP
+#define DEPS_CURL_HPP
 
 #include <cstddef>
 #include <cstdint>

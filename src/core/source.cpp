@@ -1,14 +1,14 @@
 /**
  * @file    source.cpp
- * @brief   Local file implementation of the archive byte source (see source.h).
+ * @brief   Local file implementation of the archive byte source (see source.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "core/source.h"
+#include "core/source.hpp"
 
-#include "core/fs.h"
+#include "core/fs.hpp"
 
 namespace crls{
 

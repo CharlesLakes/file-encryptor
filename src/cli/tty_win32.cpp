@@ -1,12 +1,12 @@
 /**
  * @file    tty_win32.cpp
- * @brief   Windows implementation of the password prompt (see tty.h).
+ * @brief   Windows implementation of the password prompt (see tty.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "cli/tty.h"
+#include "cli/tty.hpp"
 
 #include <algorithm>
 #include <cstdio>

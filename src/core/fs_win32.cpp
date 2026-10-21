@@ -1,6 +1,6 @@
 /**
  * @file    fs_win32.cpp
- * @brief   Windows implementation of the file system abstraction (see fs.h).
+ * @brief   Windows implementation of the file system abstraction (see fs.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
@@ -15,7 +15,7 @@
  *   both descriptors, moves the file and reopens it.
  */
 
-#include "core/fs.h"
+#include "core/fs.hpp"
 
 #include <algorithm>
 #include <array>
@@ -25,7 +25,7 @@
 #include <memory>
 #include <io.h>
 #include <windows.h>
-#include "core/util.h"
+#include "core/util.hpp"
 
 namespace crls{
 

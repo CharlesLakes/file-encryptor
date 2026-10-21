@@ -1,18 +1,18 @@
 /**
  * @file    server_fixture.cpp
- * @brief   Implementation of the background test server (see server_fixture.h).
+ * @brief   Implementation of the background test server (see server_fixture.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "server_fixture.h"
+#include "server_fixture.hpp"
 
 #include <charconv>
 #include <chrono>
 #include <cstdio>
-#include "core/net.h"
-#include "test_util.h"
+#include "core/net.hpp"
+#include "test_util.hpp"
 
 using namespace crls;
 

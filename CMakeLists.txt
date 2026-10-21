@@ -43,7 +43,7 @@ else()
   # Link the runtime libraries by their exact file names.
   find_library(SODIUM_LIB NAMES libsodium.so.23 sodium REQUIRED)
   find_library(X11_LIB NAMES libX11.so.6 X11 REQUIRED)
-  # libcurl is loaded with dlopen() (see src/deps/curl.h).
+  # libcurl is loaded with dlopen() (see src/deps/curl.hpp).
   set(SYSTEM_LIBS ${CMAKE_DL_LIBS})
   set(GUI_LIBS ${X11_LIB})
   set(PLATFORM_DEFS "")

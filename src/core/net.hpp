@@ -1,5 +1,5 @@
 /**
- * @file    net.h
+ * @file    net.hpp
  * @brief   Operating system abstraction for TCP sockets.
  * @author  @CharlesLakes
  *
@@ -16,8 +16,8 @@
  * | net_win32.cpp | Windows (Winsock 2)   |
  */
 
-#ifndef CORE_NET_H
-#define CORE_NET_H
+#ifndef CORE_NET_HPP
+#define CORE_NET_HPP
 
 #include <cstddef>
 #include <cstdint>

@@ -13,12 +13,12 @@
 #include <cstdio>
 #include <string>
 #include <string_view>
-#include "core/append.h"
-#include "core/archive.h"
-#include "core/fs.h"
-#include "core/util.h"
-#include "deps/sodium.h"
-#include "test_util.h"
+#include "core/append.hpp"
+#include "core/archive.hpp"
+#include "core/fs.hpp"
+#include "core/util.hpp"
+#include "deps/sodium.hpp"
+#include "test_util.hpp"
 
 using namespace crls;
 

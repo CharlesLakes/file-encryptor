@@ -1,5 +1,5 @@
 /**
- * @file    tty.h
+ * @file    tty.hpp
  * @brief   Operating system abstraction for reading a password from the user.
  * @author  @CharlesLakes
  *
@@ -11,8 +11,8 @@
  * | tty_win32.cpp | console mode without ENABLE_ECHO_INPUT         |
  */
 
-#ifndef CLI_TTY_H
-#define CLI_TTY_H
+#ifndef CLI_TTY_HPP
+#define CLI_TTY_HPP
 
 #include <span>
 

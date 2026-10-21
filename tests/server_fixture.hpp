@@ -1,18 +1,18 @@
 /**
- * @file    server_fixture.h
+ * @file    server_fixture.hpp
  * @brief   Runs the HTTP server in a background thread for the tests.
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#ifndef TESTS_SERVER_FIXTURE_H
-#define TESTS_SERVER_FIXTURE_H
+#ifndef TESTS_SERVER_FIXTURE_HPP
+#define TESTS_SERVER_FIXTURE_HPP
 
 #include <atomic>
 #include <string>
 #include <thread>
-#include "server/server.h"
+#include "server/server.hpp"
 
 /**
  * @brief A server for one folder on 127.0.0.1 and a free port, running in a

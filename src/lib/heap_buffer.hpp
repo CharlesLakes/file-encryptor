@@ -1,5 +1,5 @@
 /**
- * @file    heap_buffer.h
+ * @file    heap_buffer.hpp
  * @brief   Heap byte buffers whose allocation may fail without aborting.
  * @author  @CharlesLakes
  *
@@ -25,14 +25,14 @@
  * @endcode
  */
 
-#ifndef LIB_HEAP_BUFFER_H
-#define LIB_HEAP_BUFFER_H
+#ifndef LIB_HEAP_BUFFER_HPP
+#define LIB_HEAP_BUFFER_HPP
 
 #include <cstddef>
 #include <new>
 #include <span>
 #include <utility>
-#include "deps/sodium.h"
+#include "deps/sodium.hpp"
 
 namespace crls{
 

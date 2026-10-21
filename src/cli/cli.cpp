@@ -1,19 +1,19 @@
 /**
  * @file    cli.cpp
- * @brief   Implementation of the command-line client (see cli.h).
+ * @brief   Implementation of the command-line client (see cli.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "cli/cli.h"
+#include "cli/cli.hpp"
 
 #include <cstdio>
-#include "cli/tty.h"
-#include "core/archive.h"
-#include "core/remote.h"
-#include "core/status.h"
-#include "lib/secret.h"
+#include "cli/tty.hpp"
+#include "core/archive.hpp"
+#include "core/remote.hpp"
+#include "core/status.hpp"
+#include "lib/secret.hpp"
 
 namespace crls{
 

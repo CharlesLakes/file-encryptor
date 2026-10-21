@@ -1,18 +1,18 @@
 /**
  * @file    append.cpp
- * @brief   Implementation of signed appends (see append.h).
+ * @brief   Implementation of signed appends (see append.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "core/append.h"
+#include "core/append.hpp"
 
 #include <algorithm>
-#include "core/fs.h"
-#include "core/status.h"
-#include "core/util.h"
-#include "deps/sodium.h"
+#include "core/fs.hpp"
+#include "core/status.hpp"
+#include "core/util.hpp"
+#include "deps/sodium.hpp"
 
 namespace crls{
 

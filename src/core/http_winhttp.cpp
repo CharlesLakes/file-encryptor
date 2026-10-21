@@ -1,6 +1,6 @@
 /**
  * @file    http_winhttp.cpp
- * @brief   WinHTTP implementation of the HTTP abstraction (see http.h).
+ * @brief   WinHTTP implementation of the HTTP abstraction (see http.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
@@ -10,7 +10,7 @@
  * does not mix well with byte ranges.
  */
 
-#include "core/http.h"
+#include "core/http.hpp"
 
 #include <algorithm>
 #include <array>
@@ -18,7 +18,7 @@
 #include <string>
 #include <windows.h>
 #include <winhttp.h>
-#include "core/fs.h"
+#include "core/fs.hpp"
 
 #ifndef WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
 #define WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY 4

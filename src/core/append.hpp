@@ -1,5 +1,5 @@
 /**
- * @file    append.h
+ * @file    append.hpp
  * @brief   Signed appends: adding a file to an archive held by a server that
  *          does not know the password.
  * @author  @CharlesLakes
@@ -18,7 +18,7 @@
  * The body is meant to be written at the current end of the archive, which is
  * always the end of the current index (the base). The client signs a
  * description of the state it saw and of the body with the Ed25519 secret key
- * derived from the password (see archive.h); the server checks the signature
+ * derived from the password (see archive.hpp); the server checks the signature
  * with the public key stored in the header, so it never needs the password or
  * any secret. Without the password there is no valid signature, and the server
  * rejects the upload.
@@ -50,17 +50,17 @@
  * truncates the file back to the base, so the previous index stays valid.
  */
 
-#ifndef CORE_APPEND_H
-#define CORE_APPEND_H
+#ifndef CORE_APPEND_HPP
+#define CORE_APPEND_HPP
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
-#include "core/archive.h"
-#include "lib/function_ref.h"
-#include "lib/unique_fd.h"
+#include "core/archive.hpp"
+#include "lib/function_ref.hpp"
+#include "lib/unique_fd.hpp"
 
 namespace crls{
 

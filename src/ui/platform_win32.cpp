@@ -1,7 +1,7 @@
 /**
  * @file    platform_win32.cpp
  * @brief   Win32 and GDI implementation of the windowing system abstraction
- *          (see platform.h).
+ *          (see platform.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
@@ -20,7 +20,7 @@
  * function registered with platform_set_redraw().
  */
 
-#include "ui/platform.h"
+#include "ui/platform.hpp"
 
 #include <array>
 #include <cstddef>

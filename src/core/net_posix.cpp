@@ -1,12 +1,12 @@
 /**
  * @file    net_posix.cpp
- * @brief   POSIX implementation of the socket abstraction (see net.h).
+ * @brief   POSIX implementation of the socket abstraction (see net.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "core/net.h"
+#include "core/net.hpp"
 
 #include <csignal>
 #include <memory>
@@ -15,8 +15,8 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/time.h>
-#include "lib/function_ref.h"
-#include "lib/unique_fd.h"
+#include "lib/function_ref.hpp"
+#include "lib/unique_fd.hpp"
 
 namespace crls{
 

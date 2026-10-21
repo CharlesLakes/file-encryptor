@@ -1,5 +1,5 @@
 /**
- * @file    http.h
+ * @file    http.hpp
  * @brief   Operating system abstraction for HTTP and HTTPS requests.
  * @author  @CharlesLakes
  *
@@ -20,15 +20,15 @@
  * meaning of byte ranges).
  */
 
-#ifndef CORE_HTTP_H
-#define CORE_HTTP_H
+#ifndef CORE_HTTP_HPP
+#define CORE_HTTP_HPP
 
 #include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
-#include "lib/function_ref.h"
+#include "lib/function_ref.hpp"
 
 namespace crls{
 

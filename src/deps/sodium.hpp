@@ -1,5 +1,5 @@
 /**
- * @file    sodium.h
+ * @file    sodium.hpp
  * @brief   Minimal hand-written libsodium declarations.
  * @author  @CharlesLakes
  *
@@ -13,8 +13,8 @@
  * assumed here match those reported by the library.
  */
 
-#ifndef DEPS_SODIUM_H
-#define DEPS_SODIUM_H
+#ifndef DEPS_SODIUM_HPP
+#define DEPS_SODIUM_HPP
 
 #include <stddef.h>
 #include <stdint.h>

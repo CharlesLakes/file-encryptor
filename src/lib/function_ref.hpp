@@ -1,5 +1,5 @@
 /**
- * @file    function_ref.h
+ * @file    function_ref.hpp
  * @brief   Non-owning reference to a callable, for callback parameters.
  * @author  @CharlesLakes
  *
@@ -23,8 +23,8 @@
  * @endcode
  */
 
-#ifndef LIB_FUNCTION_REF_H
-#define LIB_FUNCTION_REF_H
+#ifndef LIB_FUNCTION_REF_HPP
+#define LIB_FUNCTION_REF_HPP
 
 #include <memory>
 #include <type_traits>

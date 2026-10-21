@@ -139,33 +139,33 @@ cmake/
 src/
   main.cpp            entry point: GUI, or --server / --upload
   core/               program logic, no UI code
-    archive.h/.cpp    the .crls format: open, create, add, extract, delete, compact
-    source.h/.cpp     where archive bytes are read from (a local file or a URL)
-    append.h/.cpp     signed uploads: built by the client, checked by the server
-    remote.h/.cpp     archives at http(s) URLs: Range reads with a cache, uploads
-    browser.h/.cpp    list of one folder's contents (filtered and sorted)
-    httpmsg.h/.cpp    strict HTTP/1.1 parsing (requests, ranges, hex)
-    status.h/.cpp     the status line message (set_status)
-    util.h/.cpp       little-endian ints, sizes, paths
-    fs.h              files and paths: everything that differs between systems
+    archive.hpp/.cpp  the .crls format: open, create, add, extract, delete, compact
+    source.hpp/.cpp   where archive bytes are read from (a local file or a URL)
+    append.hpp/.cpp   signed uploads: built by the client, checked by the server
+    remote.hpp/.cpp   archives at http(s) URLs: Range reads with a cache, uploads
+    browser.hpp/.cpp  list of one folder's contents (filtered and sorted)
+    httpmsg.hpp/.cpp  strict HTTP/1.1 parsing (requests, ranges, hex)
+    status.hpp/.cpp   the status line message (set_status)
+    util.hpp/.cpp     little-endian ints, sizes, paths
+    fs.hpp            files and paths: everything that differs between systems
     fs_posix.cpp      ... for Linux (pread, flock, realpath, rename)
     fs_win32.cpp      ... for Windows (ReadFile, LockFileEx, MoveFileEx)
-    net.h             TCP sockets
+    net.hpp           TCP sockets
     net_posix.cpp     ... BSD sockets
     net_win32.cpp     ... Winsock
-    http.h            HTTP(S) requests
+    http.hpp          HTTP(S) requests
     http_curl.cpp     ... libcurl, loaded with dlopen()
     http_winhttp.cpp  ... WinHTTP
   server/
-    server.h/.cpp     the --server mode
+    server.hpp/.cpp   the --server mode
   cli/
-    cli.h/.cpp        the --upload mode
-    tty.h             password prompt without echo
+    cli.hpp/.cpp      the --upload mode
+    tty.hpp           password prompt without echo
     tty_posix.cpp     ... termios
     tty_win32.cpp     ... console mode
   ui/                 GUI
-    ui.h              app_state, constants, all UI prototypes
-    platform.h        window, events, drawing and fonts, independent of the OS
+    ui.hpp            app_state, constants, all UI prototypes
+    platform.hpp      window, events, drawing and fonts, independent of the OS
     platform_x11.cpp  ... implemented with Xlib
     platform_win32.cpp ... implemented with Win32/GDI
     layout.cpp        list geometry, text fields, which buttons each screen has
@@ -173,17 +173,17 @@ src/
     actions.cpp       what each button / Enter does
     input.cpp         mouse and keyboard to actions
   deps/               hand-written declarations of external libraries
-    xlib.h            used only by platform_x11.cpp
-    sodium.h
-    curl.h            used only by http_curl.cpp
+    xlib.hpp          used only by platform_x11.cpp
+    sodium.hpp
+    curl.hpp          used only by http_curl.cpp
   lib/                basic C++ types, header only
-    unique_fd.h       file descriptor closed on destruction
-    secret.h          fixed buffers for keys and passwords, wiped on destruction
-    heap_buffer.h     large allocations that fail without aborting
-    function_ref.h    non-owning callback parameter
+    unique_fd.hpp     file descriptor closed on destruction
+    secret.hpp        fixed buffers for keys and passwords, wiped on destruction
+    heap_buffer.hpp   large allocations that fail without aborting
+    function_ref.hpp  non-owning callback parameter
 tests/
-  test_util.h/.cpp    CHECK(), CHECK_EQ(), temp_dir, files with known contents, shared checks
-  server_fixture.h/.cpp test_server: the server in a thread for the tests
+  test_util.hpp/.cpp  CHECK(), CHECK_EQ(), temp_dir, files with known contents, shared checks
+  server_fixture.hpp/.cpp test_server: the server in a thread for the tests
   test_archive.cpp    the .crls format, versions 2 and 3
   test_append.cpp     signed uploads without a network
   test_httpmsg.cpp    the HTTP parser, including malformed requests
@@ -214,7 +214,7 @@ platform event ──► input.cpp ──► actions.cpp ──► core/archive.
                                             draw.cpp repaints the whole window
 ```
 
-All UI state lives in one `app_state` object (`ui/ui.h`), created in `main()`
+All UI state lives in one `app_state` object (`ui/ui.hpp`), created in `main()`
 and passed by reference to every UI function. The current screen is
 `app.screen`. Functions that can fail return `false` (or
 an error value such as `extract_result::failed`) after they have already set an
@@ -224,7 +224,7 @@ which are wiped when it is closed.
 
 ### The `.crls` file format
 
-See the comment at the top of `src/core/archive.h` for the byte-level layout.
+See the comment at the top of `src/core/archive.hpp` for the byte-level layout.
 In short:
 
 ```
@@ -257,7 +257,7 @@ and the index, extracting a file downloads only that file. Every request sends
 `If-Match` with the archive's ETag, so a client notices when the archive was
 replaced (compacted) on the server.
 
-An upload is built entirely on the client (`core/append.h`): it encrypts the
+An upload is built entirely on the client (`core/append.hpp`): it encrypts the
 file, builds the new index and signs a message that covers the current index
 (through its random nonce), the lengths and a BLAKE2b hash of the body. The
 server checks the signature with the public key from the header **before**
@@ -270,16 +270,16 @@ the new state and tries again.
 
 - **Where things go:** format or crypto changes go in `core/archive.cpp`; the
   upload protocol in `core/append.cpp` (both sides) and `server/server.cpp`. A new
-  button means a `ui_action` value in `ui/ui.h`, an entry in `get_buttons()`
+  button means a `ui_action` value in `ui/ui.hpp`, an entry in `get_buttons()`
   (`layout.cpp`) and a `case` in `handle_action()` (`actions.cpp`). Painting goes
   in `draw.cpp`.
 - **Using a new libsodium, Xlib or libcurl function:** declare it in
   `src/deps/`, inside the `extern "C"` block, with the exact signature from the
   real header. libcurl options must go through the typed wrappers in
   `http_curl.cpp`.
-- **Operating system specific code:** files and paths go in `core/fs.h`,
-  sockets in `core/net.h`, HTTP clients in `core/http.h`, password prompts in
-  `cli/tty.h` and windowing in `ui/platform.h`, each with one implementation
+- **Operating system specific code:** files and paths go in `core/fs.hpp`,
+  sockets in `core/net.hpp`, HTTP clients in `core/http.hpp`, password prompts in
+  `cli/tty.hpp` and windowing in `ui/platform.hpp`, each with one implementation
   per system. Always add `O_BINARY` to `open()` flags, and use `fs_basename()`
   / `fs_is_separator()` / `fs_is_absolute()` instead of looking for `'/'`.
 - **Network input is hostile:** anything read from a socket or an HTTP
@@ -292,10 +292,10 @@ the new state and tries again.
   `using namespace crls;`). Two-space indentation, `snake_case`, `static` for
   anything private to a file. Every file starts with a Doxygen block (`@file`, `@brief`,
   `@author`, `Maintainer:`) and public functions are documented in their
-  header with `@brief`, `@param` and `@return`, following `src/lib/heap_buffer.h`.
+  header with `@brief`, `@param` and `@return`, following `src/lib/heap_buffer.hpp`.
   All code, comments and UI text are in English.
 - **Secrets:** keep passwords and keys in `crls::secret` / `secret_text`
-  (`lib/secret.h`), passwords being typed in `secret_string`, and decrypted
+  (`lib/secret.hpp`), passwords being typed in `secret_string`, and decrypted
   data in `secret_buffer`, which are wiped when
   destroyed; never put them in `std::string` or a growing `std::vector`, which
   can leave copies behind. Wipe anything else with `sodium_memzero()`.
@@ -325,7 +325,7 @@ the new state and tries again.
     too costly to allocate per chunk), `set_status()` writes into a fixed buffer
     because it runs after failed allocations, and the HTTP parser stores headers
     in a fixed array so that requests cause no allocations. `std::filesystem`
-    and `std::format` are not used: `core/fs.h` is the operating system layer,
+    and `std::format` are not used: `core/fs.hpp` is the operating system layer,
     and both add size to the MinGW build.
 - **Editor setup:** clangd (LunarVim, VS Code, etc.) reads
   `build/compile_commands.json`, which CMake writes on every configure, to find

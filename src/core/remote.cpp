@@ -1,23 +1,23 @@
 /**
  * @file    remote.cpp
- * @brief   Implementation of archives at URLs (see remote.h).
+ * @brief   Implementation of archives at URLs (see remote.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
  */
 
-#include "core/remote.h"
+#include "core/remote.hpp"
 
 #include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
-#include "core/append.h"
-#include "core/http.h"
-#include "core/httpmsg.h"
-#include "core/status.h"
-#include "core/util.h"
-#include "lib/heap_buffer.h"
+#include "core/append.hpp"
+#include "core/http.hpp"
+#include "core/httpmsg.hpp"
+#include "core/status.hpp"
+#include "core/util.hpp"
+#include "lib/heap_buffer.hpp"
 
 namespace crls{
 

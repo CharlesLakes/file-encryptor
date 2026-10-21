@@ -1,6 +1,6 @@
 /**
  * @file    platform_x11.cpp
- * @brief   Xlib implementation of the windowing system abstraction (see platform.h).
+ * @brief   Xlib implementation of the windowing system abstraction (see platform.hpp).
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes
@@ -9,19 +9,19 @@
  * TrueColor visual (the default on current Linux desktops).
  */
 
-#include "ui/platform.h"
+#include "ui/platform.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <span>
-#include "deps/xlib.h"
+#include "deps/xlib.hpp"
 
 namespace crls{
 
 #if defined(__x86_64__) || defined(__aarch64__)
-/* The X11 structures are declared by hand in deps/xlib.h: check them against
+/* The X11 structures are declared by hand in deps/xlib.hpp: check them against
    the layout of the real <X11/Xlib.h> on 64-bit Linux. */
 static_assert(sizeof(XEvent) == 192, "XEvent must match <X11/Xlib.h>");
 static_assert(offsetof(XButtonEvent, x) == 64 && offsetof(XButtonEvent, button) == 84,

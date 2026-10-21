@@ -1,5 +1,5 @@
 /**
- * @file    secret.h
+ * @file    secret.hpp
  * @brief   Fixed-size buffers for passwords and keys, wiped on destruction.
  * @author  @CharlesLakes
  *
@@ -19,14 +19,14 @@
  * | secret_string<N> | char            | Passwords being typed       |
  */
 
-#ifndef LIB_SECRET_H
-#define LIB_SECRET_H
+#ifndef LIB_SECRET_HPP
+#define LIB_SECRET_HPP
 
 #include <array>
 #include <cstddef>
 #include <span>
 #include <string_view>
-#include "deps/sodium.h"
+#include "deps/sodium.hpp"
 
 namespace crls{
 

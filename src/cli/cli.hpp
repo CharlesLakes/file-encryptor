@@ -1,5 +1,5 @@
 /**
- * @file    cli.h
+ * @file    cli.hpp
  * @brief   Command-line client: uploading files to an archive at a URL.
  * @author  @CharlesLakes
  *
@@ -11,12 +11,12 @@
  *
  * The password is asked without echo (or read as one line from standard input
  * when it is not a terminal). Each file is encrypted on this machine and only
- * its ciphertext and the new index are sent (see core/remote.h): the password
+ * its ciphertext and the new index are sent (see core/remote.hpp): the password
  * never leaves the client.
  */
 
-#ifndef CLI_CLI_H
-#define CLI_CLI_H
+#ifndef CLI_CLI_HPP
+#define CLI_CLI_HPP
 
 #include <span>
 
