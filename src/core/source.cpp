@@ -13,7 +13,7 @@
 namespace crls{
 
 bool fd_source::read_at(std::span<unsigned char> buf, uint64_t offset){
-  return crls::read_at(fd_, buf.data(), buf.size(), offset);
+  return crls::read_at(fd_, buf, offset);
 }
 
 uint64_t fd_source::size() const{

@@ -48,7 +48,7 @@ int main(){
   char served[PATH_MAX], crls[PATH_MAX], url[256], one[PATH_MAX], two[PATH_MAX];
   path_in(served, "served");
   CHECK_EQ(make_dir(served), 0);
-  join_path(crls, sizeof(crls), served, "cli.crls");
+  snprintf(crls, sizeof(crls), "%s", join_path(served, "cli.crls").c_str());
   make_file("one.bin", 2000, 41);
   make_file("two.bin", 3000, 42);
   path_in(one, "one.bin");

@@ -54,7 +54,7 @@ temp_dir::~temp_dir(){
 }
 
 void path_in(char *out, const char *name){
-  join_path(out, PATH_MAX, test_dir, name);
+  snprintf(out, PATH_MAX, "%s", join_path(test_dir, name).c_str());
 }
 
 void make_file(const char *name, size_t size, unsigned seed){

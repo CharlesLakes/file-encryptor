@@ -52,7 +52,7 @@ static void check_extract(archive *a, const char *out){
     char original[PATH_MAX], extracted[PATH_MAX];
     CHECK(a->extract(i, dir) == extract_result::extracted);
     path_in(original, name);
-    join_path(extracted, sizeof(extracted), dir, name);
+    snprintf(extracted, sizeof(extracted), "%s", join_path(dir, name).c_str());
     CHECK(same_files(original, extracted));
   }
 }
@@ -65,7 +65,7 @@ int main(){
   char served[PATH_MAX], crls[PATH_MAX], file[PATH_MAX], url[256];
   path_in(served, "served");
   CHECK_EQ(make_dir(served), 0);
-  join_path(crls, sizeof(crls), served, "shared.crls");
+  snprintf(crls, sizeof(crls), "%s", join_path(served, "shared.crls").c_str());
   /* Larger than the 1 MiB read block, to go through several Range requests. */
   make_file("big.bin", 3 * REMOTE_BLOCK + 12345, 31);
   make_file("small.txt", 777, 32);

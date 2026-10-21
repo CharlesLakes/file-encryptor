@@ -108,11 +108,10 @@ static void draw_list(app_state &app){
 
     if(app.screen == ui_screen::archive){
       const archive_entry &e = app.arc.entries()[i];
-      char size_text[32];
-      format_size(e.size, size_text, sizeof(size_text));
-      int size_w = text_width(ui_font::regular, size_text);
+      std::string size_text = format_size(e.size);
+      int size_w = text_width(ui_font::regular, size_text.c_str());
       draw_text_fit(ui_font::regular, x + 12, row_y + text_y, w - size_w - 48, e.name.c_str(), false, COLOR_TEXT);
-      draw_text(ui_font::regular, x + w - size_w - 20, row_y + text_y, size_text, COLOR_MUTED);
+      draw_text(ui_font::regular, x + w - size_w - 20, row_y + text_y, size_text.c_str(), COLOR_MUTED);
     }else{
       const dir_item *item = &app.files.items()[i];
       char label[MAX_NAME + 2];
@@ -212,16 +211,15 @@ static void draw_open_screen(app_state &app){
  */
 static void draw_archive_screen(app_state &app){
   archive *a = &app.arc;
-  draw_text_fit(ui_font::title, MARGIN, 34, platform_width() - 2*MARGIN, fs_basename(a->path().c_str()), false, COLOR_TEXT);
+  draw_text_fit(ui_font::title, MARGIN, 34, platform_width() - 2*MARGIN, std::string(fs_basename(a->path())).c_str(), false, COLOR_TEXT);
   draw_text_fit(ui_font::regular, MARGIN, 58, platform_width() - 2*MARGIN, a->path().c_str(), true, COLOR_MUTED);
 
   uint64_t wasted = a->wasted_space();
-  char size_text[32], wasted_text[32], line[160];
-  format_size(a->total_size(), size_text, sizeof(size_text));
-  format_size(wasted, wasted_text, sizeof(wasted_text));
-  snprintf(line, sizeof(line), "%zu file%s, %s", a->entries().size(), a->entries().size() == 1 ? "" : "s", size_text);
+  char line[160];
+  snprintf(line, sizeof(line), "%zu file%s, %s", a->entries().size(), a->entries().size() == 1 ? "" : "s",
+           format_size(a->total_size()).c_str());
   if(a->is_remote()) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  remote: Add uploads");
-  else if(wasted) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  %s unused (Compact)", wasted_text);
+  else if(wasted) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  %s unused (Compact)", format_size(wasted).c_str());
   draw_text(ui_font::regular, MARGIN, 80, line, COLOR_MUTED);
   draw_list(app);
 }

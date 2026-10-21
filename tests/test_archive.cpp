@@ -35,7 +35,7 @@ static void check_extract_all(archive *a, const char *out_name){
     CHECK(a->extract(i, out) == extract_result::skipped);
     char original[PATH_MAX], extracted[PATH_MAX];
     path_in(original, name);
-    join_path(extracted, sizeof(extracted), out, name);
+    snprintf(extracted, sizeof(extracted), "%s", join_path(out, name).c_str());
     CHECK(same_files(original, extracted));
   }
 }
@@ -60,7 +60,7 @@ static int header_version(const char *crls){
  */
 static void check_v2_fixture(const char *fixtures){
   char source[PATH_MAX], crls[PATH_MAX];
-  join_path(source, sizeof(source), fixtures, "v2.crls");
+  snprintf(source, sizeof(source), "%s", join_path(fixtures, "v2.crls").c_str());
   path_in(crls, "v2.crls");
   CHECK(copy_file(source, crls));
 

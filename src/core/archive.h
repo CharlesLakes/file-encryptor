@@ -71,6 +71,7 @@
 #ifndef CORE_ARCHIVE_H
 #define CORE_ARCHIVE_H
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -87,8 +88,8 @@
 
 namespace crls{
 
-inline constexpr char MAGIC[] = "CRLS\0\0";              /**< Magic number at the start of every archive. */
-inline constexpr std::size_t MAGIC_BYTES = 6;            /**< Length of the magic number. */
+/** @brief Magic number at the start of every archive. */
+inline constexpr std::array<unsigned char, 6> MAGIC = {'C', 'R', 'L', 'S', 0, 0};
 inline constexpr std::size_t KEY_BYTES = 32;             /**< Symmetric key length. */
 inline constexpr std::size_t SALT_BYTES = 16;            /**< Argon2id salt length. */
 inline constexpr std::size_t NONCE_BYTES = 24;           /**< XChaCha20-Poly1305 nonce length. */
@@ -99,12 +100,18 @@ inline constexpr unsigned V2_HEADER_BYTES = 64;          /**< Header length of f
 inline constexpr unsigned V2_AD_BYTES = 40;              /**< Associated data length of version 2. */
 inline constexpr unsigned V3_HEADER_BYTES = 96;          /**< Header length of format version 3. */
 inline constexpr unsigned V3_AD_BYTES = 72;              /**< Associated data length of version 3. */
-inline constexpr unsigned MAX_HEADER_BYTES = 96;         /**< Largest header of any supported version. */
-inline constexpr unsigned MAX_AD_BYTES = 72;             /**< Largest associated data of any version. */
+inline constexpr unsigned MAX_HEADER_BYTES = std::max(V2_HEADER_BYTES, V3_HEADER_BYTES); /**< Largest header of any version. */
+inline constexpr unsigned MAX_AD_BYTES = std::max(V2_AD_BYTES, V3_AD_BYTES);             /**< Largest associated data of any version. */
+inline constexpr std::size_t HEADER_VERSION_POS = 6;     /**< Header offset of the format version. */
+inline constexpr std::size_t HEADER_ALGORITHM_POS = 7;   /**< Header offset of the algorithm. */
+inline constexpr std::size_t HEADER_OPS_POS = 8;         /**< Header offset of the Argon2id operations limit. */
+inline constexpr std::size_t HEADER_MEM_POS = 16;        /**< Header offset of the Argon2id memory limit. */
+inline constexpr std::size_t HEADER_SALT_POS = 24;       /**< Header offset of the salt. */
+inline constexpr std::size_t HEADER_PK_POS = 40;         /**< Header offset of the Ed25519 public key (version 3). */
 inline constexpr std::size_t SIGN_PK_BYTES = 32;         /**< Ed25519 public key length. */
 inline constexpr std::size_t SIGN_SK_BYTES = 64;         /**< Ed25519 secret key length. */
 inline constexpr std::size_t SIGN_BYTES = 64;            /**< Ed25519 signature length. */
-inline constexpr char KDF_CONTEXT[] = "CRLS_v3_";        /**< crypto_kdf context of version 3. */
+inline constexpr std::string_view KDF_CONTEXT = "CRLS_v3_"; /**< crypto_kdf context of version 3. */
 inline constexpr std::size_t CHUNK = 64 * 1024;          /**< Plaintext chunk size. */
 inline constexpr std::size_t MAX_NAME = 255;             /**< Maximum length of a stored file name. */
 inline constexpr std::size_t MAX_PASSWORD = 128;         /**< Maximum password length. */
@@ -237,6 +244,11 @@ public:
   /** @brief The authenticated start of the header (salt at offset 24, public key at 40). */
   std::span<const unsigned char> header_ad() const noexcept{ return {header_ad_.data(), ad_len_}; }
 
+  /** @brief The Argon2id salt from the header. */
+  std::span<const unsigned char, SALT_BYTES> salt() const noexcept{
+    return std::span(header_ad_).subspan<HEADER_SALT_POS, SALT_BYTES>();
+  }
+
   /** @brief The byte source the archive is read from, or nullptr when closed. */
   byte_source* source() noexcept{ return src_.get(); }
 
@@ -281,19 +293,17 @@ public:
    * @param  path     Path of the file to encrypt.
    * @param  fd       Destination file descriptor.
    * @param  position Destination offset, which becomes the offset of the entry.
-   * @param  e        Output: the new entry.
-   * @return True on success, false otherwise (fd may hold partial data).
+   * @return The new entry, or std::nullopt on failure (fd may hold partial data).
    */
-  [[nodiscard]] bool encrypt_file(const std::string &path, int fd, uint64_t position, archive_entry &e);
+  [[nodiscard]] std::optional<archive_entry> encrypt_file(const std::string &path, int fd, uint64_t position);
 
   /**
-   * @brief  Encrypts the current index, optionally with one extra entry at the
+   * @brief  Encrypts the current index, optionally with extra entries at the
    *         end, without writing it anywhere.
-   * @param  extra Entry appended to the index, or nullptr.
-   * @param  blob  Output: nonce followed by the ciphertext.
-   * @return True on success, false otherwise.
+   * @param  extra Entries appended to the index.
+   * @return The nonce followed by the ciphertext, or std::nullopt on failure.
    */
-  [[nodiscard]] bool build_index(const archive_entry *extra, heap_buffer &blob);
+  [[nodiscard]] std::optional<heap_buffer> build_index(std::span<const archive_entry> extra = {});
 
   /**
    * @brief Records an entry that was appended elsewhere (an accepted upload),
@@ -308,10 +318,11 @@ public:
 
 private:
   void set_layout(int version);
-  [[nodiscard]] bool derive_keys(const char *password, const unsigned char *header, unsigned char *pk);
-  void derive_v3_keys(const unsigned char *master, unsigned char *pk);
+  [[nodiscard]] bool derive_keys(const char *password, std::span<const unsigned char, MAX_HEADER_BYTES> header,
+                                 std::span<unsigned char, SIGN_PK_BYTES> pk);
+  void derive_v3_keys(std::span<const unsigned char, KEY_BYTES> master, std::span<unsigned char, SIGN_PK_BYTES> pk);
   [[nodiscard]] bool load(const std::string &name, const char *password);
-  [[nodiscard]] bool parse_index(const unsigned char *p, uint64_t size, uint64_t total_size);
+  [[nodiscard]] bool parse_index(std::span<const unsigned char> plain, uint64_t total_size);
   [[nodiscard]] bool write_index(int fd);
   void remember_path(const std::string &path);
 

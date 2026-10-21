@@ -10,7 +10,7 @@
  * @code
  * crls::unique_fd fd(open(path, O_RDONLY | O_BINARY));
  * if(!fd) return false;            // open() failed
- * read_at(fd.get(), buf, len, 0);  // the descriptor is closed when fd goes out of scope
+ * read_at(fd.get(), buf, 0);  // the descriptor is closed when fd goes out of scope
  * @endcode
  *
  * Move-only, like std::unique_ptr. release() gives up ownership without

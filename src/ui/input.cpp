@@ -128,7 +128,7 @@ void handle_key(app_state &app, const ui_event *event){
     activate_selection(app);
   }else if(key == ui_key::escape && app.screen != ui_screen::archive){
     handle_action(app, ui_action::pick_cancel);
-  }else if(key == ui_key::backspace && app.screen != ui_screen::archive && !fs_is_root(app.files.dir().c_str())){
+  }else if(key == ui_key::backspace && app.screen != ui_screen::archive && !fs_is_root(app.files.dir())){
     app.files.enter("..");
   }else if(key == ui_key::del && app.screen == ui_screen::archive){
     handle_action(app, ui_action::remove);

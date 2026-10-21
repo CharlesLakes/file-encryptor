@@ -114,7 +114,7 @@ static int post(const char *target, const append_upload *up, uint64_t send){
   char head[1024];
   post_head(target, up, head);
   std::vector<unsigned char> body(static_cast<size_t>(up->claim.content_length));
-  read_at(up->body_fd(), body.data(), body.size(), 0);
+  CHECK(read_at(up->body_fd(), body, 0));
   response r;
   bool ok = request(head, body.data(), static_cast<size_t>(send), &r);
   return ok ? r.status : 0;
@@ -151,9 +151,9 @@ int main(int argc, char **argv){
   char served[PATH_MAX], crls[PATH_MAX], file[PATH_MAX], source[PATH_MAX], v2[PATH_MAX];
   path_in(served, "served");
   CHECK_EQ(make_dir(served), 0);
-  join_path(crls, sizeof(crls), served, "remote.crls");
-  join_path(v2, sizeof(v2), served, "old.crls");
-  join_path(source, sizeof(source), argv[1], "v2.crls");
+  snprintf(crls, sizeof(crls), "%s", join_path(served, "remote.crls").c_str());
+  snprintf(v2, sizeof(v2), "%s", join_path(served, "old.crls").c_str());
+  snprintf(source, sizeof(source), "%s", join_path(argv[1], "v2.crls").c_str());
   CHECK(copy_file(source, v2));
   make_file("served/notes.txt", 10, 1);
   make_file("first.bin", 3*CHUNK + 1, 21);
@@ -179,7 +179,7 @@ int main(int argc, char **argv){
   int fd = open(crls, O_RDONLY | O_BINARY);
   uint64_t size = file_size(fd);
   std::vector<unsigned char> expected(static_cast<size_t>(size));
-  CHECK(read_at(fd, expected.data(), expected.size(), 0));
+  CHECK(read_at(fd, expected, 0));
   close(fd);
   CHECK(get("GET", "/remote.crls", "", &r) == 200);
   CHECK(r.body.size() == size && memcmp(r.body.data(), expected.data(), expected.size()) == 0);
@@ -252,7 +252,7 @@ int main(int argc, char **argv){
     CHECK(a.entries()[i].name == names[i]);
     CHECK(a.extract(i, out) == extract_result::extracted);
     path_in(original, names[i]);
-    join_path(extracted, sizeof(extracted), out, names[i]);
+    snprintf(extracted, sizeof(extracted), "%s", join_path(out, names[i]).c_str());
     CHECK(same_files(original, extracted));
   }
   a.close();

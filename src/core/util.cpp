@@ -8,40 +8,34 @@
 
 #include "core/util.h"
 
-#include <stdio.h>
-#include <string.h>
+#include <array>
+#include <charconv>
 #include "core/fs.h"
 
 namespace crls{
 
-void put_le(unsigned char *p, uint64_t value, int bytes){
-  for(int i = 0; i < bytes; i++)
-    p[i] = (unsigned char) (value >> (8*i));
-}
-
-uint64_t get_le(const unsigned char *p, int bytes){
-  uint64_t value = 0;
-  for(int i = 0; i < bytes; i++)
-    value |= (uint64_t) p[i] << (8*i);
-  return value;
-}
-
-void format_size(uint64_t size, char *out, size_t out_size){
-  const char *units[] = {"B", "KB", "MB", "GB", "TB"};
-  double value = (double) size;
-  int unit = 0;
-  while(value >= 1024 && unit < 4){
+std::string format_size(uint64_t size){
+  static constexpr std::array<std::string_view, 5> units = {"B", "KB", "MB", "GB", "TB"};
+  if(size < 1024) return std::to_string(size) + " B";
+  double value = static_cast<double>(size);
+  std::size_t unit = 0;
+  while(value >= 1024 && unit < units.size() - 1){
     value /= 1024;
     unit++;
   }
-  if(unit == 0) snprintf(out, out_size, "%llu B", (unsigned long long) size);
-  else snprintf(out, out_size, "%.1f %s", value, units[unit]);
+  std::array<char, 32> digits;
+  auto [end, ec] = std::to_chars(digits.data(), digits.data() + digits.size(), value, std::chars_format::fixed, 1);
+  std::string text(digits.data(), ec == std::errc() ? end : digits.data());
+  text += ' ';
+  text += units[unit];
+  return text;
 }
 
-void join_path(char *out, size_t out_size, const char *dir, const char *name){
-  size_t len = strlen(dir);
-  if(len > 0 && fs_is_separator(dir[len - 1])) snprintf(out, out_size, "%s%s", dir, name);
-  else snprintf(out, out_size, "%s/%s", dir, name);
+std::string join_path(std::string_view dir, std::string_view name){
+  std::string path(dir);
+  if(path.empty() || !fs_is_separator(path.back())) path += '/';
+  path += name;
+  return path;
 }
 
 }

@@ -8,31 +8,11 @@
 
 #include "core/httpmsg.h"
 
+#include "core/util.h"
+
 namespace crls{
 
 namespace{
-
-/**
- * @brief  Lowercases an ASCII character.
- * @param  c Character.
- * @return c in lowercase.
- */
-char lower(char c){
-  return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
-/**
- * @brief  Compares two strings case-insensitively (ASCII).
- * @param  a First string.
- * @param  b Second string.
- * @return True if they are equal.
- */
-bool equals_nocase(std::string_view a, std::string_view b){
-  if(a.size() != b.size()) return false;
-  for(std::size_t i = 0; i < a.size(); i++)
-    if(lower(a[i]) != lower(b[i])) return false;
-  return true;
-}
 
 /**
  * @brief  Checks whether c may appear in a header name (RFC 9110 token).
@@ -42,17 +22,6 @@ bool equals_nocase(std::string_view a, std::string_view b){
 bool is_token_char(char c){
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
          std::string_view("!#$%&'*+-.^_`|~").find(c) != std::string_view::npos;
-}
-
-/**
- * @brief  Removes spaces and tabs from both ends.
- * @param  s String.
- * @return The trimmed slice.
- */
-std::string_view trim(std::string_view s){
-  while(!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
-  while(!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.remove_suffix(1);
-  return s;
 }
 
 /**

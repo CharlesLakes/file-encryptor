@@ -17,18 +17,28 @@
 
 #include "core/fs.h"
 
-#include <errno.h>
+#include <algorithm>
+#include <array>
+#include <cerrno>
+#include <charconv>
+#include <cstdlib>
+#include <memory>
 #include <io.h>
-#include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <windows.h>
+#include "core/util.h"
 
 namespace crls{
 
+/** @brief Deleter of a string allocated with malloc() by the C library. */
+struct c_free{
+  void operator()(char *p) const noexcept{ free(p); }
+};
+
+/** @brief A malloc()ed string that is freed when it goes out of scope. */
+using c_string = std::unique_ptr<char, c_free>;
+
 /** @brief Largest transfer passed to a single ReadFile() or WriteFile() call. */
-inline constexpr DWORD MAX_TRANSFER = 1u << 30;
+inline constexpr std::size_t MAX_TRANSFER = 1u << 30;
 
 /**
  * @brief  Returns the Windows handle behind a C runtime descriptor.
@@ -36,7 +46,7 @@ inline constexpr DWORD MAX_TRANSFER = 1u << 30;
  * @return Handle, or INVALID_HANDLE_VALUE.
  */
 static HANDLE handle_of(int fd){
-  return (HANDLE) _get_osfhandle(fd);
+  return reinterpret_cast<HANDLE>(_get_osfhandle(fd));
 }
 
 /**
@@ -45,39 +55,34 @@ static HANDLE handle_of(int fd){
  * @return Initialized structure.
  */
 static OVERLAPPED at_offset(uint64_t offset){
-  OVERLAPPED ov;
-  memset(&ov, 0, sizeof(ov));
-  ov.Offset = (DWORD) offset;
-  ov.OffsetHigh = (DWORD) (offset >> 32);
+  OVERLAPPED ov{};
+  ov.Offset = static_cast<DWORD>(offset);
+  ov.OffsetHigh = static_cast<DWORD>(offset >> 32);
   return ov;
 }
 
-bool read_at(int fd, void *buf, size_t len, uint64_t offset){
+bool read_at(int fd, std::span<unsigned char> buf, uint64_t offset){
   HANDLE h = handle_of(fd);
-  unsigned char *p = (unsigned char *) buf;
-  while(len > 0){
-    DWORD want = len < MAX_TRANSFER ? (DWORD) len : MAX_TRANSFER, got = 0;
+  while(!buf.empty()){
+    DWORD want = static_cast<DWORD>(std::min(buf.size(), MAX_TRANSFER)), got = 0;
     OVERLAPPED ov = at_offset(offset);
-    if(!ReadFile(h, p, want, &got, &ov) || got == 0) return false;
-    p += got;
-    len -= got;
+    if(!ReadFile(h, buf.data(), want, &got, &ov) || got == 0) return false;
+    buf = buf.subspan(got);
     offset += got;
   }
   return true;
 }
 
-bool write_at(int fd, const void *buf, size_t len, uint64_t offset){
+bool write_at(int fd, std::span<const unsigned char> buf, uint64_t offset){
   HANDLE h = handle_of(fd);
-  const unsigned char *p = (const unsigned char *) buf;
-  while(len > 0){
-    DWORD want = len < MAX_TRANSFER ? (DWORD) len : MAX_TRANSFER, put = 0;
+  while(!buf.empty()){
+    DWORD want = static_cast<DWORD>(std::min(buf.size(), MAX_TRANSFER)), put = 0;
     OVERLAPPED ov = at_offset(offset);
-    if(!WriteFile(h, p, want, &put, &ov) || put == 0){
+    if(!WriteFile(h, buf.data(), want, &put, &ov) || put == 0){
       errno = EIO;
       return false;
     }
-    p += put;
-    len -= put;
+    buf = buf.subspan(put);
     offset += put;
   }
   return true;
@@ -85,7 +90,7 @@ bool write_at(int fd, const void *buf, size_t len, uint64_t offset){
 
 uint64_t file_size(int fd){
   LARGE_INTEGER size;
-  return GetFileSizeEx(handle_of(fd), &size) ? (uint64_t) size.QuadPart : 0;
+  return GetFileSizeEx(handle_of(fd), &size) ? static_cast<uint64_t>(size.QuadPart) : 0;
 }
 
 bool fs_lock(int fd){
@@ -99,7 +104,7 @@ bool fs_sync(int fd){
 }
 
 bool fs_truncate(int fd, uint64_t size){
-  return _chsize_s(fd, (long long) size) == 0;
+  return _chsize_s(fd, static_cast<long long>(size)) == 0;
 }
 
 bool fs_same_file(int fd_a, int fd_b){
@@ -109,17 +114,31 @@ bool fs_same_file(int fd_a, int fd_b){
          a.nFileIndexHigh == b.nFileIndexHigh && a.nFileIndexLow == b.nFileIndexLow;
 }
 
-bool fs_absolute_path(const std::string &path, std::string &out){
-  char full[PATH_MAX];
-  if(!_fullpath(full, path.c_str(), PATH_MAX) || GetFileAttributesA(full) == INVALID_FILE_ATTRIBUTES){
+std::optional<std::string> fs_absolute_path(const std::string &path){
+  /* With a null buffer, _fullpath() allocates the result with malloc(). */
+  c_string full(_fullpath(nullptr, path.c_str(), 0));
+  if(!full || GetFileAttributesA(full.get()) == INVALID_FILE_ATTRIBUTES){
     errno = ENOENT;
-    return false;
+    return std::nullopt;
   }
   /* Drop trailing separators, except the one of a drive root such as "C:\". */
-  size_t len = strlen(full);
-  while(len > 1 && fs_is_separator(full[len - 1]) && !fs_is_root(full)) full[--len] = '\0';
-  out = full;
-  return true;
+  std::string out(full.get());
+  while(out.size() > 1 && fs_is_separator(out.back()) && !fs_is_root(out)) out.pop_back();
+  return out;
+}
+
+std::optional<std::string> fs_current_dir(){
+  DWORD size = GetCurrentDirectoryA(0, nullptr);
+  if(size == 0) return std::nullopt;
+  std::string dir(size, '\0');
+  DWORD len = GetCurrentDirectoryA(size, dir.data());
+  if(len == 0 || len >= size) return std::nullopt;
+  dir.resize(len);
+  return dir;
+}
+
+bool fs_exists(const std::string &path){
+  return GetFileAttributesA(path.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
 /**
@@ -152,8 +171,8 @@ bool fs_replace_file(const std::string &from, unique_fd &from_fd, const std::str
 unique_fd fs_open_regular(const std::string &path, bool write){
   /* FILE_SHARE_DELETE lets the GUI compact (replace) the file while it is open here. */
   HANDLE h = CreateFileA(path.c_str(), GENERIC_READ | (write ? GENERIC_WRITE : 0),
-                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
-                         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                         FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
   if(h == INVALID_HANDLE_VALUE) return unique_fd();
   BY_HANDLE_FILE_INFORMATION info;
   if(!GetFileInformationByHandle(h, &info) || GetFileType(h) != FILE_TYPE_DISK ||
@@ -161,48 +180,66 @@ unique_fd fs_open_regular(const std::string &path, bool write){
     CloseHandle(h);
     return unique_fd();
   }
-  int fd = _open_osfhandle((intptr_t) h, (write ? _O_RDWR : _O_RDONLY) | _O_BINARY);
+  int fd = _open_osfhandle(reinterpret_cast<intptr_t>(h), (write ? _O_RDWR : _O_RDONLY) | _O_BINARY);
   if(fd < 0) CloseHandle(h);
   return unique_fd(fd);
 }
 
-bool fs_file_id(int fd, char *out, size_t out_size){
+/**
+ * @brief  Formats a number in hexadecimal.
+ * @param  value     Number.
+ * @param  min_width Minimum number of digits, padded with zeros.
+ * @return Lowercase digits, without a prefix.
+ */
+static std::string to_hex(uint64_t value, std::size_t min_width = 0){
+  std::array<char, 16> digits;
+  auto [end, ec] = std::to_chars(digits.data(), digits.data() + digits.size(), value, 16);
+  std::string text(digits.data(), end);
+  if(text.size() < min_width) text.insert(0, min_width - text.size(), '0');
+  return text;
+}
+
+std::optional<std::string> fs_file_id(int fd){
   BY_HANDLE_FILE_INFORMATION info;
-  if(!GetFileInformationByHandle(handle_of(fd), &info)) return false;
-  snprintf(out, out_size, "%lx-%lx%08lx", (unsigned long) info.dwVolumeSerialNumber,
-           (unsigned long) info.nFileIndexHigh, (unsigned long) info.nFileIndexLow);
-  return true;
+  if(!GetFileInformationByHandle(handle_of(fd), &info)) return std::nullopt;
+  return to_hex(info.dwVolumeSerialNumber) + "-" + to_hex(info.nFileIndexHigh) + to_hex(info.nFileIndexLow, 8);
 }
 
 unique_fd fs_temp_file(){
-  char dir[MAX_PATH], path[MAX_PATH];
-  if(!GetTempPathA(sizeof(dir), dir) || !GetTempFileNameA(dir, "crl", 0, path)) return unique_fd();
+  std::array<char, MAX_PATH> dir, path;
+  if(!GetTempPathA(static_cast<DWORD>(dir.size()), dir.data()) || !GetTempFileNameA(dir.data(), "crl", 0, path.data()))
+    return unique_fd();
   /* _O_TEMPORARY deletes the file when the last descriptor is closed. */
-  return unique_fd(open(path, O_RDWR | O_TRUNC | O_BINARY | _O_TEMPORARY));
+  return unique_fd(open(path.data(), O_RDWR | O_TRUNC | O_BINARY | _O_TEMPORARY));
 }
 
 bool fs_is_separator(char c){
   return c == '/' || c == '\\';
 }
 
-bool fs_is_absolute(const char *path){
+/**
+ * @brief  Checks whether c is an ASCII letter, as in a drive name.
+ * @param  c Character.
+ * @return True for 'A' to 'Z' and 'a' to 'z'.
+ */
+static bool is_drive_letter(char c){
+  return ascii_lower(c) >= 'a' && ascii_lower(c) <= 'z';
+}
+
+bool fs_is_absolute(std::string_view path){
   /* "\\x" and "/x" are relative to the current drive, which is good enough here. */
-  if(fs_is_separator(path[0])) return true;
-  return ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
-         path[1] == ':' && fs_is_separator(path[2]);
+  if(!path.empty() && fs_is_separator(path[0])) return true;
+  return path.size() >= 3 && is_drive_letter(path[0]) && path[1] == ':' && fs_is_separator(path[2]);
 }
 
-bool fs_is_root(const char *path){
-  size_t len = strlen(path);
-  if(len == 1) return fs_is_separator(path[0]);
-  return len == 3 && path[1] == ':' && fs_is_separator(path[2]);
+bool fs_is_root(std::string_view path){
+  if(path.size() == 1) return fs_is_separator(path[0]);
+  return path.size() == 3 && path[1] == ':' && fs_is_separator(path[2]);
 }
 
-const char* fs_basename(const char *path){
-  const char *name = path;
-  for(const char *p = path; *p; p++)
-    if(fs_is_separator(*p) || *p == ':') name = p + 1;
-  return name;
+std::string_view fs_basename(std::string_view path){
+  std::size_t last = path.find_last_of("/\\:");
+  return last == std::string_view::npos ? path : path.substr(last + 1);
 }
 
 /**
@@ -212,27 +249,23 @@ const char* fs_basename(const char *path){
  * @param  name File name.
  * @return True if the name refers to a device.
  */
-static bool is_device_name(const char *name){
-  static const char *devices[] = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", NULL};
-  size_t stem = strcspn(name, ".");
-  char upper[8];
-  if(stem >= sizeof(upper)) return false;
-  for(size_t i = 0; i < stem; i++) upper[i] = (char) (name[i] >= 'a' && name[i] <= 'z' ? name[i] - 32 : name[i]);
-  upper[stem] = '\0';
-  for(int i = 0; devices[i]; i++)
-    if(strcmp(upper, devices[i]) == 0) return true;
-  return stem == 4 && (strncmp(upper, "COM", 3) == 0 || strncmp(upper, "LPT", 3) == 0) &&
-         upper[3] >= '1' && upper[3] <= '9';
+static bool is_device_name(std::string_view name){
+  static constexpr std::array<std::string_view, 6> devices = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"};
+  std::string_view stem = name.substr(0, name.find('.'));
+  if(std::ranges::any_of(devices, [&](std::string_view d){ return equals_nocase(stem, d); })) return true;
+  return stem.size() == 4 && (starts_with_nocase(stem, "COM") || starts_with_nocase(stem, "LPT")) &&
+         stem[3] >= '1' && stem[3] <= '9';
 }
 
-bool fs_is_plain_name(const char *name){
-  size_t len = strlen(name);
-  if(len == 0 || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return false;
+bool fs_is_plain_name(std::string_view name){
+  if(name.empty() || name == "." || name == "..") return false;
   /* Windows silently strips trailing dots and spaces, so "..." would mean "..". */
-  if(name[len - 1] == '.' || name[len - 1] == ' ') return false;
-  for(const char *p = name; *p; p++)
-    if((unsigned char) *p < 32 || strchr("/\\:*?\"<>|", *p)) return false;
-  return !is_device_name(name);
+  if(name.back() == '.' || name.back() == ' ') return false;
+  constexpr std::string_view forbidden = "/\\:*?\"<>|";
+  bool bad_char = std::ranges::any_of(name, [&](char c){
+    return static_cast<unsigned char>(c) < 32 || forbidden.find(c) != std::string_view::npos;
+  });
+  return !bad_char && !is_device_name(name);
 }
 
 }

@@ -8,10 +8,7 @@
 
 #include "core/remote.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <strings.h>
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
@@ -75,7 +72,7 @@ public:
   const std::string& etag() const noexcept{ return etag_; }
 
 private:
-  bool fetch_range(unsigned char *buf, uint64_t first, size_t len, bool check_etag, size_t *got);
+  std::optional<size_t> fetch_range(std::span<unsigned char> buf, uint64_t first, bool check_etag);
 
   std::string url_;                    /**< URL of the archive. */
   std::string etag_;                   /**< ETag of the archive. */
@@ -86,71 +83,67 @@ private:
 };
 
 bool remote_is_url(std::string_view s){
-  auto starts_nocase = [&](std::string_view prefix){
-    return s.size() >= prefix.size() && strncasecmp(s.data(), prefix.data(), prefix.size()) == 0;
-  };
-  return starts_nocase("http://") || starts_nocase("https://");
+  return starts_with_nocase(s, "http://") || starts_with_nocase(s, "https://");
 }
 
 /**
- * @brief  Fetches bytes first..first+len-1 of the archive with a Range request.
+ * @brief  Fetches the bytes from first on into buf with a Range request.
  *
  * The response must be 206 with exactly the requested Content-Range and body
  * length. With check_etag false (first request, reload) the ETag and size are
  * learned from the response; otherwise If-Match is sent and the total size
  * must not change.
  *
- * @param  buf        Destination buffer of len bytes.
+ * @param  buf        Destination; its size is the number of bytes wanted (on
+ *                    the first request, the most wanted).
  * @param  first      First byte.
- * @param  len        Number of bytes; on the first request, the most wanted.
  * @param  check_etag True to send If-Match and require the known size.
- * @param  got        Output: number of bytes received.
- * @return True on success, false otherwise (the status explains why).
+ * @return The number of bytes received, or std::nullopt on failure (the
+ *         status explains why).
  */
-bool remote_source::fetch_range(unsigned char *buf, uint64_t first, size_t len, bool check_etag, size_t *got){
+std::optional<size_t> remote_source::fetch_range(std::span<unsigned char> buf, uint64_t first, bool check_etag){
   /* Copy the body into buf and reject anything beyond the requested length. */
   size_t received = 0;
   auto sink = [&](std::span<const unsigned char> data){
-    if(data.size() > len - received) return false;
-    memcpy(buf + received, data.data(), data.size());
+    if(data.size() > buf.size() - received) return false;
+    std::ranges::copy(data, buf.begin() + static_cast<std::ptrdiff_t>(received));
     received += data.size();
     return true;
   };
   http_request_spec req;
   req.url = url_;
-  req.headers.push_back("Range: bytes=" + std::to_string(first) + "-" + std::to_string(first + len - 1));
+  req.headers.push_back("Range: bytes=" + std::to_string(first) + "-" + std::to_string(first + buf.size() - 1));
   if(check_etag && !etag_.empty()) req.headers.push_back("If-Match: " + etag_);
   req.sink = sink;
   http_response resp;
   if(!http_perform(req, resp)){
     set_status(true, "Could not download %s: %s", url_.c_str(), resp.error.c_str());
-    return false;
+    return std::nullopt;
   }
   if(resp.status == 412){
     set_status(true, "The archive changed on the server (it was compacted or replaced). Open it again.");
-    return false;
+    return std::nullopt;
   }
   if(resp.status == 200){
     set_status(true, "The server does not support byte ranges, which are needed to read archives.");
-    return false;
+    return std::nullopt;
   }
   if(resp.status != 206){
     set_status(true, "The server answered %d %s for %s.", resp.status, http_reason(resp.status), url_.c_str());
-    return false;
+    return std::nullopt;
   }
 
   std::optional<http_content_range> range = http_parse_content_range(resp.content_range);
   if(!range || range->first != first || range->last - range->first + 1 != received ||
      (check_etag && range->total != size_)){
     set_status(true, "The server sent an unexpected range for %s.", url_.c_str());
-    return false;
+    return std::nullopt;
   }
   if(!check_etag){
     size_ = range->total;
     etag_ = resp.etag;
   }
-  *got = received;
-  return true;
+  return received;
 }
 
 bool remote_source::read_at(std::span<unsigned char> buf, uint64_t offset){
@@ -158,27 +151,27 @@ bool remote_source::read_at(std::span<unsigned char> buf, uint64_t offset){
   if(len == 0) return true;
   if(offset > size_ || len > size_ - offset) return false;
   if(block_len_ && offset >= block_start_ && offset + len <= block_start_ + block_len_){
-    memcpy(buf.data(), block_.data() + (offset - block_start_), len);
+    std::ranges::copy(block_.span().subspan(static_cast<size_t>(offset - block_start_), len), buf.begin());
     return true;
   }
 
-  size_t got;
-  if(len > REMOTE_BLOCK) return fetch_range(buf.data(), offset, len, true, &got);
-  size_t want = size_ - offset < REMOTE_BLOCK ? (size_t) (size_ - offset) : REMOTE_BLOCK;
+  if(len > REMOTE_BLOCK) return fetch_range(buf, offset, true).has_value();
+  size_t want = static_cast<size_t>(std::min<uint64_t>(size_ - offset, REMOTE_BLOCK));
   block_len_ = 0;
-  if(!fetch_range(block_.data(), offset, want, true, &got)) return false;
+  std::optional<size_t> got = fetch_range(block_.span().first(want), offset, true);
+  if(!got) return false;
   block_start_ = offset;
-  block_len_ = got;
-  memcpy(buf.data(), block_.data(), len);
+  block_len_ = *got;
+  std::ranges::copy(block_.span().first(len), buf.begin());
   return true;
 }
 
 bool remote_source::refresh(){
-  size_t got;
   block_len_ = 0;
-  if(!fetch_range(block_.data(), 0, REMOTE_BLOCK, false, &got)) return false;
+  std::optional<size_t> got = fetch_range(block_.span().first(REMOTE_BLOCK), 0, false);
+  if(!got) return false;
   block_start_ = 0;
-  block_len_ = got;
+  block_len_ = *got;
   return true;
 }
 
@@ -193,53 +186,52 @@ bool remote_open(archive &a, const std::string &url, const char *password){
  * @brief  Sends a prepared upload.
  * @param  c  Remote state.
  * @param  up Prepared upload.
- * @param  resp Output: the response.
- * @return True if a response was received.
+ * @return The response, or std::nullopt if none was received (the status
+ *         explains why).
  */
-static bool send_upload(remote_source *c, const append_upload *up, http_response *resp){
+static std::optional<http_response> send_upload(const remote_source &c, const append_upload &up){
   http_request_spec req;
   req.method = "POST";
-  req.url = c->url();
+  req.url = c.url();
   req.headers = {"Content-Type: application/octet-stream",
-                 "X-Crls-Base: " + std::to_string(up->claim.base),
-                 "X-Crls-Index-Length: " + std::to_string(up->claim.index_length),
-                 "X-Crls-Index-Nonce: " + http_hex_encode(up->claim.index_nonce),
-                 "X-Crls-Body-Hash: " + http_hex_encode(up->claim.body_hash),
-                 "X-Crls-Sig: " + http_hex_encode(up->claim.signature)};
-  if(!c->etag().empty()) req.headers.push_back("If-Match: " + c->etag());
-  req.body_fd = up->body_fd();
-  req.body_len = up->claim.content_length;
-  if(http_perform(req, *resp)) return true;
-  set_status(true, "Could not upload to %s: %s", c->url().c_str(), resp->error.c_str());
-  return false;
+                 "X-Crls-Base: " + std::to_string(up.claim.base),
+                 "X-Crls-Index-Length: " + std::to_string(up.claim.index_length),
+                 "X-Crls-Index-Nonce: " + http_hex_encode(up.claim.index_nonce),
+                 "X-Crls-Body-Hash: " + http_hex_encode(up.claim.body_hash),
+                 "X-Crls-Sig: " + http_hex_encode(up.claim.signature)};
+  if(!c.etag().empty()) req.headers.push_back("If-Match: " + c.etag());
+  req.body_fd = up.body_fd();
+  req.body_len = up.claim.content_length;
+  http_response resp;
+  if(http_perform(req, resp)) return resp;
+  set_status(true, "Could not upload to %s: %s", c.url().c_str(), resp.error.c_str());
+  return std::nullopt;
 }
 
 bool remote_add_file(archive &a, const std::string &path){
   remote_source *c = a.source() ? a.source()->as_remote() : nullptr;
-  append_upload up;
   if(!a.is_remote() || !c){
     set_status(true, "This archive is not remote.");
     return false;
   }
+  append_upload up;
   if(!up.prepare(a, path)) return false;
 
-  bool ok = false;
-  int attempt;
-  for(attempt = 0; attempt < MAX_UPLOAD_ATTEMPTS; attempt++){
-    http_response resp;
-    if(!send_upload(c, &up, &resp)) break;
-    if(resp.status == 204){
+  for(int attempt = 0; attempt < MAX_UPLOAD_ATTEMPTS; attempt++){
+    std::optional<http_response> resp = send_upload(*c, up);
+    if(!resp) return false;
+    if(resp->status == 204){
       up.applied(a);
       c->grew(up.claim.base + up.claim.content_length);
-      ok = true;
-      break;
+      set_status(false, "Uploaded %s (%s).", up.entry().name.c_str(), format_size(up.entry().size).c_str());
+      return true;
     }
-    if(resp.status == 409){
+    if(resp->status == 409){
       /* Someone else uploaded first: build the index again on top of theirs. */
-      if(!c->refresh() || !a.reload() || !up.rebase(a)) break;
+      if(!c->refresh() || !a.reload() || !up.rebase(a)) return false;
       continue;
     }
-    switch(resp.status){
+    switch(resp->status){
       case 403: set_status(true, "The server rejected the upload: the password does not match."); break;
       case 404: set_status(true, "The archive no longer exists on the server."); break;
       case 405: set_status(true, "This server does not accept uploads (it is not a FileEncryptor server)."); break;
@@ -247,18 +239,12 @@ bool remote_add_file(archive &a, const std::string &path){
       case 413: set_status(true, "The file is too large for the server."); break;
       case 422: set_status(true, "The archive on the server must be compacted to accept uploads."); break;
       case 423: set_status(true, "The archive is open on the server machine. Try again later."); break;
-      default:  set_status(true, "The server answered %d %s.", resp.status, http_reason(resp.status)); break;
+      default:  set_status(true, "The server answered %d %s.", resp->status, http_reason(resp->status)); break;
     }
-    break;
+    return false;
   }
-  if(attempt == MAX_UPLOAD_ATTEMPTS) set_status(true, "The archive kept changing on the server. Try again.");
-
-  if(ok){
-    char size_text[32];
-    format_size(up.entry().size, size_text, sizeof(size_text));
-    set_status(false, "Uploaded %s (%s).", up.entry().name.c_str(), size_text);
-  }
-  return ok;
+  set_status(true, "The archive kept changing on the server. Try again.");
+  return false;
 }
 
 }

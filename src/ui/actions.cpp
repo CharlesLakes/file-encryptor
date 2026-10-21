@@ -10,7 +10,6 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 #include "core/fs.h"
 #include "core/remote.h"
 #include "core/status.h"
@@ -27,15 +26,14 @@ void clear_secrets(app_state &app){
 }
 
 /**
- * @brief Resolves the path field, which may be a URL, an absolute path or a
- *        path relative to the browsed folder.
- * @param app Application state.
- * @param out      Destination buffer.
- * @param out_size Capacity of out.
+ * @brief  Resolves the path field, which may be a URL, an absolute path or a
+ *         path relative to the browsed folder.
+ * @param  app Application state.
+ * @return The URL or path.
  */
-static void resolve_field_path(app_state &app, char *out, size_t out_size){
-  if(remote_is_url(app.path_field) || fs_is_absolute(app.path_field)) snprintf(out, out_size, "%s", app.path_field);
-  else join_path(out, out_size, app.files.dir().c_str(), app.path_field);
+static std::string resolve_field_path(const app_state &app){
+  if(remote_is_url(app.path_field) || fs_is_absolute(app.path_field)) return app.path_field;
+  return join_path(app.files.dir(), app.path_field);
 }
 
 /**
@@ -61,7 +59,7 @@ static void go_to(app_state &app, ui_screen new_screen, browser_filter filter){
 static void on_browser_select(app_state &app){
   if(app.screen != ui_screen::open || app.files.sel < 0) return;
   const dir_item *item = &app.files.items()[app.files.sel];
-  if(!item->is_dir) join_path(app.path_field, sizeof(app.path_field), app.files.dir().c_str(), item->name.c_str());
+  if(!item->is_dir) snprintf(app.path_field, sizeof(app.path_field), "%s", join_path(app.files.dir(), item->name).c_str());
 }
 
 /* ---------------- Actions ---------------- */
@@ -81,8 +79,7 @@ static void open_archive(app_state &app){
     return;
   }
 
-  char path[PATH_MAX];
-  resolve_field_path(app, path, sizeof(path));
+  std::string path = resolve_field_path(app);
   bool remote = remote_is_url(path);
   set_status(false, remote ? "Downloading the index and deriving the key..." : "Deriving the key...");
   draw(app);
@@ -113,9 +110,8 @@ static void create_archive(app_state &app){
     return;
   }
 
-  char path[PATH_MAX];
-  resolve_field_path(app, path, sizeof(path));
-  if(!has_crls_ext(path)) strncat(path, ".crls", sizeof(path) - strlen(path) - 1);
+  std::string path = resolve_field_path(app);
+  if(!has_crls_ext(path)) path += ".crls";
 
   if(strlen(app.password_field) < MIN_PASSWORD){
     set_status(true, "The password must have at least %zu characters.", MIN_PASSWORD);
@@ -127,8 +123,8 @@ static void create_archive(app_state &app){
     app.focus = ui_field::confirm;
     return;
   }
-  if(access(path, F_OK) == 0){
-    set_status(true, "%s already exists. Press Open to use it.", path);
+  if(fs_exists(path)){
+    set_status(true, "%s already exists. Press Open to use it.", path.c_str());
     return;
   }
 
@@ -202,9 +198,7 @@ static void compact(app_state &app){
   }
   set_status(false, "Compacting...");
   draw(app);
-  char wasted_text[32];
-  format_size(wasted, wasted_text, sizeof(wasted_text));
-  if(app.arc.compact()) set_status(false, "Compacted: reclaimed %s.", wasted_text);
+  if(app.arc.compact()) set_status(false, "Compacted: reclaimed %s.", format_size(wasted).c_str());
   else if(!app.arc.is_open()) app.screen = ui_screen::open;
 }
 
@@ -231,8 +225,7 @@ static void pick_confirm(app_state &app){
     app.files.enter(item->name);
     return;
   }
-  char path[PATH_MAX];
-  join_path(path, sizeof(path), app.files.dir().c_str(), item->name.c_str());
+  std::string path = join_path(app.files.dir(), item->name);
   bool remote = app.arc.is_remote();
   set_status(false, remote ? "Encrypting and uploading %s..." : "Adding %s...", item->name.c_str());
   draw(app);

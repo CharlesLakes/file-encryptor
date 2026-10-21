@@ -23,38 +23,39 @@
 #ifndef CORE_FS_H
 #define CORE_FS_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
 #include <fcntl.h>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include "lib/unique_fd.h"
 
-namespace crls{
-
+/* A macro, because it is combined with the O_* flags of <fcntl.h>. */
 #ifndef O_BINARY
 #define O_BINARY 0
 #endif
 
+namespace crls{
+
 /**
- * @brief  Reads exactly len bytes at offset.
+ * @brief  Fills buf with the bytes at offset.
  * @param  fd     File descriptor.
- * @param  buf    Destination buffer.
- * @param  len    Number of bytes to read.
+ * @param  buf    Destination; exactly buf.size() bytes are read.
  * @param  offset Position in the file.
  * @return True on success, false on any error or premature end of file.
  */
-bool        read_at(int fd, void *buf, size_t len, uint64_t offset);
+[[nodiscard]] bool read_at(int fd, std::span<unsigned char> buf, uint64_t offset);
 
 /**
- * @brief  Writes exactly len bytes at offset.
+ * @brief  Writes all of buf at offset.
  * @param  fd     File descriptor.
- * @param  buf    Source buffer.
- * @param  len    Number of bytes to write.
+ * @param  buf    Bytes to write.
  * @param  offset Position in the file.
  * @return True on success, false on any error.
  */
-bool        write_at(int fd, const void *buf, size_t len, uint64_t offset);
+[[nodiscard]] bool write_at(int fd, std::span<const unsigned char> buf, uint64_t offset);
 
 /**
  * @brief  Returns the size of an open file.
@@ -96,10 +97,22 @@ bool        fs_same_file(int fd_a, int fd_b);
 /**
  * @brief  Resolves path into an absolute, normalized path.
  * @param  path Path to resolve (an existing file or folder).
- * @param  out  Output: the absolute path (may be the same object as path).
- * @return True on success, false otherwise.
+ * @return The absolute path, or std::nullopt (with errno set) on failure.
  */
-bool        fs_absolute_path(const std::string &path, std::string &out);
+std::optional<std::string> fs_absolute_path(const std::string &path);
+
+/**
+ * @brief  Returns the current working folder.
+ * @return Its absolute path, or std::nullopt if it cannot be determined.
+ */
+std::optional<std::string> fs_current_dir();
+
+/**
+ * @brief  Checks whether anything (a file, a folder, a link...) exists at path.
+ * @param  path Path.
+ * @return True if it exists.
+ */
+bool        fs_exists(const std::string &path);
 
 /**
  * @brief  Replaces the file at to with the file at from.
@@ -130,13 +143,11 @@ unique_fd   fs_open_regular(const std::string &path, bool write);
 /**
  * @brief  Describes the identity of an open file (device and inode, or volume
  *         and file index). It changes when the file is replaced, for example
- *         by archive_compact(), but not when it is modified in place.
- * @param  fd       File descriptor.
- * @param  out      Destination buffer.
- * @param  out_size Capacity of out (64 bytes are enough).
- * @return True on success, false otherwise.
+ *         by archive::compact(), but not when it is modified in place.
+ * @param  fd File descriptor.
+ * @return Short hexadecimal text, or std::nullopt on failure.
  */
-bool        fs_file_id(int fd, char *out, size_t out_size);
+std::optional<std::string> fs_file_id(int fd);
 
 /**
  * @brief  Creates an anonymous temporary file, deleted when it is closed.
@@ -156,21 +167,21 @@ bool        fs_is_separator(char c);
  * @param  path Path.
  * @return True for "/x" (and "C:\\x", "C:/x" or "\\\\server\\x" on Windows).
  */
-bool        fs_is_absolute(const char *path);
+bool        fs_is_absolute(std::string_view path);
 
 /**
  * @brief  Checks whether an absolute path is the root of its file system.
  * @param  path Absolute path, e.g. "/" or "C:\\".
  * @return True if path has no parent folder, false otherwise.
  */
-bool        fs_is_root(const char *path);
+bool        fs_is_root(std::string_view path);
 
 /**
  * @brief  Returns the last component of a path.
  * @param  path Path.
- * @return Pointer into path just after its last separator, or path itself.
+ * @return The part of path after its last separator, or path itself.
  */
-const char* fs_basename(const char *path);
+std::string_view fs_basename(std::string_view path);
 
 /**
  * @brief  Checks that name is a single path component that cannot escape the
@@ -178,7 +189,7 @@ const char* fs_basename(const char *path);
  * @param  name File name.
  * @return True if the name is safe, false otherwise.
  */
-bool        fs_is_plain_name(const char *name);
+bool        fs_is_plain_name(std::string_view name);
 
 }
 

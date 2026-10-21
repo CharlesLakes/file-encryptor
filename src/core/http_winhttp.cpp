@@ -12,8 +12,8 @@
 
 #include "core/http.h"
 
-#include <cstdio>
-#include <cstring>
+#include <algorithm>
+#include <array>
 #include <memory>
 #include <string>
 #include <windows.h>
@@ -28,8 +28,9 @@ namespace crls{
 
 namespace{
 
-/* Scratch buffer for request and response bodies, one request at a time. */
-unsigned char transfer_chunk[64 * 1024];
+/* Scratch buffer for request and response bodies, one request at a time.
+   Static because it is too large for the stack of a Windows thread. */
+std::array<unsigned char, 64 * 1024> transfer_chunk;
 
 /** @brief Deleter of a WinHTTP handle. */
 struct handle_deleter{
@@ -45,25 +46,41 @@ using internet_handle = std::unique_ptr<void, handle_deleter>;
  */
 std::wstring to_wide(std::string_view s){
   if(s.empty()) return std::wstring();
-  int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), NULL, 0);
+  int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
   std::wstring out(n > 0 ? static_cast<size_t>(n) : 0, L'\0');
   if(n > 0) MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n);
   return out;
 }
 
 /**
- * @brief Copies a response header as UTF-8.
- * @param request Request handle.
- * @param name    Header name.
- * @param out     Output: the value, or empty.
+ * @brief  Converts a UTF-16 string to UTF-8.
+ * @param  s UTF-16 string.
+ * @return The converted string (empty if s cannot be converted).
  */
-void query_header(HINTERNET request, const wchar_t *name, std::string &out){
-  wchar_t value[256];
-  DWORD size = sizeof(value);
-  out.clear();
-  if(!WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, name, value, &size, WINHTTP_NO_HEADER_INDEX)) return;
-  char utf8[512];
-  if(WideCharToMultiByte(CP_UTF8, 0, value, -1, utf8, sizeof(utf8), NULL, NULL) > 0) out = utf8;
+std::string to_utf8(std::wstring_view s){
+  if(s.empty()) return std::string();
+  int n = WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0, nullptr, nullptr);
+  std::string out(n > 0 ? static_cast<size_t>(n) : 0, '\0');
+  if(n > 0) WideCharToMultiByte(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n, nullptr, nullptr);
+  return out;
+}
+
+/**
+ * @brief  Returns a response header as UTF-8, whatever its length.
+ * @param  request Request handle.
+ * @param  name    Header name.
+ * @return The value, or an empty string if the header is missing.
+ */
+std::string query_header(HINTERNET request, const wchar_t *name){
+  /* The first call only reports the size, in bytes. */
+  DWORD size = 0;
+  WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, name, WINHTTP_NO_OUTPUT_BUFFER, &size, WINHTTP_NO_HEADER_INDEX);
+  if(GetLastError() != ERROR_INSUFFICIENT_BUFFER || size == 0) return std::string();
+  std::wstring value(size / sizeof(wchar_t), L'\0');
+  if(!WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, name, value.data(), &size, WINHTTP_NO_HEADER_INDEX))
+    return std::string();
+  value.resize(size / sizeof(wchar_t));
+  return to_utf8(value);
 }
 
 /**
@@ -73,9 +90,7 @@ void query_header(HINTERNET request, const wchar_t *name, std::string &out){
  * @return False, for convenience.
  */
 bool fail(http_response &resp, const char *what){
-  char text[128];
-  snprintf(text, sizeof(text), "%s failed (error %lu).", what, static_cast<unsigned long>(GetLastError()));
-  resp.error = text;
+  resp.error = std::string(what) + " failed (error " + std::to_string(GetLastError()) + ").";
   return false;
 }
 
@@ -84,19 +99,19 @@ bool fail(http_response &resp, const char *what){
 bool http_perform(const http_request_spec &req, http_response &resp){
   resp = http_response();
   std::wstring url = to_wide(req.url), method = to_wide(req.method);
-  wchar_t host[256], path[4096];
+  std::array<wchar_t, 256> host;
+  std::array<wchar_t, 4096> path;
   if(url.empty() || method.empty()){
     resp.error = "Invalid URL.";
     return false;
   }
 
-  URL_COMPONENTS parts;
-  memset(&parts, 0, sizeof(parts));
+  URL_COMPONENTS parts{};
   parts.dwStructSize = sizeof(parts);
-  parts.lpszHostName = host;
-  parts.dwHostNameLength = 256;
-  parts.lpszUrlPath = path;
-  parts.dwUrlPathLength = 4096;
+  parts.lpszHostName = host.data();
+  parts.dwHostNameLength = static_cast<DWORD>(host.size());
+  parts.lpszUrlPath = path.data();
+  parts.dwUrlPathLength = static_cast<DWORD>(path.size());
   if(!WinHttpCrackUrl(url.c_str(), 0, 0, &parts) ||
      (parts.nScheme != INTERNET_SCHEME_HTTP && parts.nScheme != INTERNET_SCHEME_HTTPS)){
     resp.error = "Only http and https URLs are supported.";
@@ -109,9 +124,9 @@ bool http_perform(const http_request_spec &req, http_response &resp){
   if(!session) session.reset(WinHttpOpen(L"FileEncryptor", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
   if(!session) return fail(resp, "WinHttpOpen");
-  internet_handle connection(WinHttpConnect(session.get(), host, parts.nPort, 0));
+  internet_handle connection(WinHttpConnect(session.get(), host.data(), parts.nPort, 0));
   if(!connection) return fail(resp, "WinHttpConnect");
-  internet_handle request(WinHttpOpenRequest(connection.get(), method.c_str(), path, NULL, WINHTTP_NO_REFERER,
+  internet_handle request(WinHttpOpenRequest(connection.get(), method.c_str(), path.data(), nullptr, WINHTTP_NO_REFERER,
                                              WINHTTP_DEFAULT_ACCEPT_TYPES,
                                              parts.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0));
   if(!request) return fail(resp, "WinHttpOpenRequest");
@@ -135,26 +150,28 @@ bool http_perform(const http_request_spec &req, http_response &resp){
   if(!WinHttpSendRequest(request.get(), WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, total, 0))
     return fail(resp, "WinHttpSendRequest");
   for(uint64_t sent = 0; sent < req.body_len; ){
-    DWORD n = req.body_len - sent < sizeof(transfer_chunk) ? static_cast<DWORD>(req.body_len - sent) : sizeof(transfer_chunk);
-    DWORD written = 0;
-    if(!read_at(req.body_fd, transfer_chunk, n, sent) || !WinHttpWriteData(request.get(), transfer_chunk, n, &written) ||
+    std::span<unsigned char> chunk = std::span(transfer_chunk)
+                                         .first(static_cast<size_t>(std::min<uint64_t>(req.body_len - sent, transfer_chunk.size())));
+    DWORD n = static_cast<DWORD>(chunk.size()), written = 0;
+    if(!read_at(req.body_fd, chunk, sent) || !WinHttpWriteData(request.get(), chunk.data(), n, &written) ||
        written != n) return fail(resp, "WinHttpWriteData");
     sent += n;
   }
-  if(!WinHttpReceiveResponse(request.get(), NULL)) return fail(resp, "WinHttpReceiveResponse");
+  if(!WinHttpReceiveResponse(request.get(), nullptr)) return fail(resp, "WinHttpReceiveResponse");
 
   DWORD status = 0, size = sizeof(status);
   WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX,
                       &status, &size, WINHTTP_NO_HEADER_INDEX);
   resp.status = static_cast<int>(status);
-  query_header(request.get(), L"Content-Range", resp.content_range);
-  query_header(request.get(), L"ETag", resp.etag);
+  resp.content_range = query_header(request.get(), L"Content-Range");
+  resp.etag = query_header(request.get(), L"ETag");
 
   while(req.method != "HEAD"){
     DWORD n = 0;
-    if(!WinHttpReadData(request.get(), transfer_chunk, sizeof(transfer_chunk), &n)) return fail(resp, "WinHttpReadData");
+    if(!WinHttpReadData(request.get(), transfer_chunk.data(), static_cast<DWORD>(transfer_chunk.size()), &n))
+      return fail(resp, "WinHttpReadData");
     if(n == 0) break;
-    if(req.sink && !req.sink({transfer_chunk, n})){
+    if(req.sink && !req.sink(std::span(transfer_chunk).first(n))){
       resp.error = "The response was rejected.";
       return false;
     }

@@ -101,9 +101,9 @@ static bool valid_archive_name(const char *name){
  * @return True on success, false otherwise.
  */
 static bool make_etag(int fd, char *out, size_t out_size){
-  char id[64];
-  if(!fs_file_id(fd, id, sizeof(id))) return false;
-  snprintf(out, out_size, "\"%s\"", id);
+  std::optional<std::string> id = fs_file_id(fd);
+  if(!id) return false;
+  snprintf(out, out_size, "\"%s\"", id->c_str());
   return true;
 }
 
@@ -160,9 +160,8 @@ static int serve_listing(const server_config &cfg, net_socket s, bool head_only)
  */
 static int serve_archive(const server_config &cfg, net_socket s, const http_request *req,
                          const char *name, bool head_only){
-  char path[PATH_MAX], etag[80], extra[512];
-  join_path(path, sizeof(path), cfg.dir.c_str(), name);
-  unique_fd fd = fs_open_regular(path, false);
+  char etag[80], extra[512];
+  unique_fd fd = fs_open_regular(join_path(cfg.dir, name), false);
   if(!fd) return send_error(s, 404, "", head_only);
   if(!make_etag(fd.get(), etag, sizeof(etag))){
     return send_error(s, 500, "", head_only);
@@ -186,7 +185,7 @@ static int serve_archive(const server_config &cfg, net_socket s, const http_requ
   uint64_t length = size ? last - first + 1 : 0;
 
   /* On Windows a file locked by the GUI cannot be read: say so before any header. */
-  if(length > 0 && !read_at(fd.get(), send_chunk, 1, first)){
+  if(length > 0 && !read_at(fd.get(), std::span(send_chunk, 1), first)){
     return send_error(s, 503, "Retry-After: 5\r\n", head_only);
   }
 
@@ -197,7 +196,7 @@ static int serve_archive(const server_config &cfg, net_socket s, const http_requ
   bool ok = send_head(s, status, "application/octet-stream", length, extra);
   for(uint64_t sent = 0; ok && !head_only && sent < length; ){
     size_t chunk = length - sent < sizeof(send_chunk) ? (size_t) (length - sent) : sizeof(send_chunk);
-    ok = read_at(fd.get(), send_chunk, chunk, first + sent) && net_send_all(s, send_chunk, chunk);
+    ok = read_at(fd.get(), std::span(send_chunk, chunk), first + sent) && net_send_all(s, send_chunk, chunk);
     sent += chunk;
   }
   return status;
@@ -293,9 +292,8 @@ static int serve_append(const server_config &cfg, net_socket s, const http_reque
   if(!read_claim(req, &claim)) return send_error(s, 400, "", false);
   if(claim.content_length > cfg.max_upload) return send_error(s, 413, "", false);
 
-  char path[PATH_MAX], etag[80];
-  join_path(path, sizeof(path), cfg.dir.c_str(), name);
-  unique_fd fd = fs_open_regular(path, true);
+  char etag[80];
+  unique_fd fd = fs_open_regular(join_path(cfg.dir, name), true);
   if(!fd) return send_error(s, 404, "", false);
   if(!make_etag(fd.get(), etag, sizeof(etag)) || !if_match_ok(req, etag)){
     return send_error(s, 412, "", false);
@@ -416,10 +414,12 @@ int server_main(int argc, char **argv){
     server_usage();
     return 2;
   }
-  if(!fs_absolute_path(argv[1], cfg.dir)){
+  std::optional<std::string> dir = fs_absolute_path(argv[1]);
+  if(!dir){
     fprintf(stderr, "Could not find the folder %s.\n", argv[1]);
     return 2;
   }
+  cfg.dir = std::move(*dir);
 
   /* Every option takes a value: they come in pairs. */
   for(int i = 2; i < argc; i += 2){

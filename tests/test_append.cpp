@@ -40,7 +40,7 @@ static append_result serve(const char *crls, const append_upload *up){
     /* Read the body from the client's temporary file, as the server reads a request. */
     uint64_t position = 0;
     r = append_commit(fd.get(), up->claim, [&](std::span<unsigned char> buf){
-      bool ok = read_at(up->body_fd(), buf.data(), buf.size(), position);
+      bool ok = read_at(up->body_fd(), buf, position);
       position += buf.size();
       return ok;
     });
@@ -86,7 +86,7 @@ static void check_contents(const char *crls, const char **names, unsigned int co
     CHECK(a.extract(i, dir) == extract_result::extracted);
     char original[PATH_MAX], extracted[PATH_MAX];
     path_in(original, names[i]);
-    join_path(extracted, sizeof(extracted), dir, names[i]);
+    snprintf(extracted, sizeof(extracted), "%s", join_path(dir, names[i]).c_str());
     CHECK(same_files(original, extracted));
   }
   a.close();
@@ -164,10 +164,10 @@ int main(int argc, char **argv){
   uint64_t size_before = file_size(fd);
   close(fd);
   CHECK(prepare(crls, PASSWORD, "fifth.bin", &up));
-  unsigned char byte;
-  CHECK(read_at(up.body_fd(), &byte, 1, 10));
-  byte ^= 1;
-  CHECK(write_at(up.body_fd(), &byte, 1, 10));
+  std::array<unsigned char, 1> byte;
+  CHECK(read_at(up.body_fd(), byte, 10));
+  byte[0] ^= 1;
+  CHECK(write_at(up.body_fd(), byte, 10));
   CHECK(serve(crls, &up) == append_result::bad_request);
   fd = open(crls, O_RDONLY | O_BINARY);
   CHECK_EQ(file_size(fd), size_before);
@@ -182,7 +182,8 @@ int main(int argc, char **argv){
 
   /* Bytes left after the index by an interrupted upload are removed. */
   fd = open(crls, O_RDWR | O_BINARY);
-  CHECK(write_at(fd, "garbage", 7, size_before));
+  constexpr std::string_view garbage = "garbage";
+  CHECK(write_at(fd, {reinterpret_cast<const unsigned char *>(garbage.data()), garbage.size()}, size_before));
   close(fd);
   CHECK(prepare(crls, PASSWORD, "fifth.bin", &up));
   CHECK(serve(crls, &up) == append_result::ok);
@@ -191,7 +192,7 @@ int main(int argc, char **argv){
 
   /* Version 2 archives have no upload key. */
   char source[PATH_MAX], v2[PATH_MAX];
-  join_path(source, sizeof(source), argv[1], "v2.crls");
+  snprintf(source, sizeof(source), "%s", join_path(argv[1], "v2.crls").c_str());
   path_in(v2, "v2.crls");
   CHECK(copy_file(source, v2));
   fd = open(v2, O_RDWR | O_BINARY);

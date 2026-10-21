@@ -21,7 +21,7 @@
  *   set_status(true, "Not enough memory.");
  *   return false;
  * }
- * read_at(fd, blob.data(), blob.size(), offset);
+ * read_at(fd, blob.span(), offset);
  * @endcode
  */
 
