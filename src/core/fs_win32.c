@@ -182,6 +182,13 @@ bool fs_is_separator(char c){
   return c == '/' || c == '\\';
 }
 
+bool fs_is_absolute(const char *path){
+  /* "\\x" and "/x" are relative to the current drive, which is good enough here. */
+  if(fs_is_separator(path[0])) return true;
+  return ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+         path[1] == ':' && fs_is_separator(path[2]);
+}
+
 bool fs_is_root(const char *path){
   size_t len = strlen(path);
   if(len == 1) return fs_is_separator(path[0]);

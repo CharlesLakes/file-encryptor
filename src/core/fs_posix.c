@@ -109,6 +109,10 @@ bool fs_is_separator(char c){
   return c == '/';
 }
 
+bool fs_is_absolute(const char *path){
+  return path[0] == '/';
+}
+
 bool fs_is_root(const char *path){
   return strcmp(path, "/") == 0;
 }

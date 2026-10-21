@@ -107,6 +107,9 @@ int get_buttons(button *b){
   int count = 0, x = MARGIN;
   for(int i = 0; i < MAX_BUTTONS && layouts[app.screen][i].label; i++){
     const char *label = layouts[app.screen][i].label;
+    int action = layouts[app.screen][i].action;
+    /* A remote archive only grows by uploads: deleting and compacting happen on the server. */
+    if(app.screen == SCREEN_ARCHIVE && app.archive.is_remote && (action == ACT_DELETE || action == ACT_COMPACT)) continue;
     b[count].label = label;
     b[count].action = layouts[app.screen][i].action;
     b[count].color = layouts[app.screen][i].color;

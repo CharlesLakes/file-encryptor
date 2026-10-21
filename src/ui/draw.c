@@ -194,7 +194,7 @@ static void draw_open_screen(void){
   draw_text(FONT_TITLE, MARGIN, 34, ".crls archive manager", COLOR_TEXT);
   draw_folder_line();
   draw_list();
-  draw_field(FIELD_PATH, ".crls file", app.path_field, false);
+  draw_field(FIELD_PATH, ".crls file or URL", app.path_field, false);
   draw_field(FIELD_PASSWORD, "Password", app.password_field, true);
   draw_field(FIELD_CONFIRM, "Confirm (create)", app.confirm_field, true);
 }
@@ -212,7 +212,8 @@ static void draw_archive_screen(void){
   format_size(archive_total_size(a), size_text, sizeof(size_text));
   format_size(wasted, wasted_text, sizeof(wasted_text));
   snprintf(line, sizeof(line), "%u file%s, %s", a->entries.n, a->entries.n == 1 ? "" : "s", size_text);
-  if(wasted) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  %s unused (Compact)", wasted_text);
+  if(a->is_remote) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  remote: Add uploads");
+  else if(wasted) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  %s unused (Compact)", wasted_text);
   draw_text(FONT_REGULAR, MARGIN, 80, line, COLOR_MUTED);
   draw_list();
 }

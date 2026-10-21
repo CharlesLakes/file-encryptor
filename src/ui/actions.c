@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include "core/fs.h"
+#include "core/remote.h"
 #include "core/status.h"
 #include "core/util.h"
 #include "deps/sodium.h"
@@ -23,13 +25,13 @@ void clear_secrets(void){
 }
 
 /**
- * @brief Resolves the path field, which may be absolute or relative to the
- *        browsed folder.
+ * @brief Resolves the path field, which may be a URL, an absolute path or a
+ *        path relative to the browsed folder.
  * @param out      Destination buffer.
  * @param out_size Capacity of out.
  */
 static void resolve_field_path(char *out, size_t out_size){
-  if(app.path_field[0] == '/') snprintf(out, out_size, "%s", app.path_field);
+  if(remote_is_url(app.path_field) || fs_is_absolute(app.path_field)) snprintf(out, out_size, "%s", app.path_field);
   else join_path(out, out_size, app.browser.dir, app.path_field);
 }
 
@@ -75,10 +77,12 @@ static void open_archive(void){
 
   char path[PATH_MAX];
   resolve_field_path(path, sizeof(path));
-  set_status(false, "Deriving the key...");
+  bool remote = remote_is_url(path);
+  set_status(false, remote ? "Downloading the index and deriving the key..." : "Deriving the key...");
   draw();
 
-  if(!archive_open(&app.archive, path, app.password_field)) return;
+  if(remote ? !remote_open(&app.archive, path, app.password_field)
+            : !archive_open(&app.archive, path, app.password_field)) return;
   clear_secrets();
   unsigned int n = app.archive.entries.n;
   app.entry_sel = n ? 0 : -1;
@@ -94,6 +98,11 @@ static void create_archive(void){
   if(app.path_field[0] == '\0'){
     set_status(true, "Type the name of the new .crls file.");
     app.focus = FIELD_PATH;
+    return;
+  }
+
+  if(remote_is_url(app.path_field)){
+    set_status(true, "Create the archive here, then copy it to the server.");
     return;
   }
 
@@ -151,7 +160,9 @@ static void extract_to_current_dir(void){
  * @brief Deletes the selected entry. The first call only requests confirmation.
  */
 static void delete_selected(void){
-  if(app.entry_sel < 0){
+  if(app.archive.is_remote){
+    set_status(true, "Files cannot be deleted from a remote archive.");
+  }else if(app.entry_sel < 0){
     set_status(true, "Select the file you want to delete.");
   }else if(app.confirm_delete != app.entry_sel){
     app.confirm_delete = app.entry_sel;
@@ -170,6 +181,10 @@ static void delete_selected(void){
  * @brief Compacts the archive if it contains unused space.
  */
 static void compact(void){
+  if(app.archive.is_remote){
+    set_status(true, "A remote archive can only be compacted on the server.");
+    return;
+  }
   uint64_t wasted = archive_wasted_space(&app.archive);
   if(wasted == 0){
     set_status(false, "There is no unused space.");
@@ -207,9 +222,10 @@ static void pick_confirm(void){
   }
   char path[PATH_MAX];
   join_path(path, sizeof(path), app.browser.dir, item->name);
-  set_status(false, "Adding %s...", item->name);
+  bool remote = app.archive.is_remote;
+  set_status(false, remote ? "Encrypting and uploading %s..." : "Adding %s...", item->name);
   draw();
-  if(archive_add_file(&app.archive, path)){
+  if(remote ? remote_add_file(&app.archive, path) : archive_add_file(&app.archive, path)){
     app.entry_sel = (int) app.archive.entries.n - 1;
     app.screen = SCREEN_ARCHIVE;
     ensure_visible();

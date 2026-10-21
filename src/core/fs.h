@@ -148,6 +148,13 @@ int         fs_temp_file(void);
 bool        fs_is_separator(char c);
 
 /**
+ * @brief  Checks whether a path is absolute.
+ * @param  path Path.
+ * @return True for "/x" (and "C:\\x", "C:/x" or "\\\\server\\x" on Windows).
+ */
+bool        fs_is_absolute(const char *path);
+
+/**
  * @brief  Checks whether an absolute path is the root of its file system.
  * @param  path Absolute path, e.g. "/" or "C:\\".
  * @return True if path has no parent folder, false otherwise.
