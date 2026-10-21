@@ -30,6 +30,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(WIN32)
   set(OS_SRC  src/core/fs_win32.c src/core/net_win32.c src/core/http_winhttp.c)
   set(GUI_SRC src/ui/platform_win32.c)
+  set(TTY_SRC src/cli/tty_win32.c)
   find_library(SODIUM_LIB NAMES sodium libsodium REQUIRED)
   set(SYSTEM_LIBS ws2_32 winhttp)
   set(GUI_LIBS gdi32 user32)
@@ -37,6 +38,7 @@ if(WIN32)
 else()
   set(OS_SRC  src/core/fs_posix.c src/core/net_posix.c src/core/http_curl.c)
   set(GUI_SRC src/ui/platform_x11.c)
+  set(TTY_SRC src/cli/tty_posix.c)
   # Link the runtime libraries by their exact file names.
   find_library(SODIUM_LIB NAMES libsodium.so.23 sodium REQUIRED)
   find_library(X11_LIB NAMES libX11.so.6 X11 REQUIRED)
@@ -70,6 +72,11 @@ target_link_libraries(crls_core PUBLIC ${SODIUM_LIB} ${SYSTEM_LIBS})
 add_library(crls_server STATIC src/server/server.c)
 target_link_libraries(crls_server PUBLIC crls_core)
 
+# ---------------- Command-line client ----------------
+
+add_library(crls_cli STATIC src/cli/cli.c ${TTY_SRC})
+target_link_libraries(crls_cli PUBLIC crls_core)
+
 # ---------------- Program ----------------
 
 set(UI_SRC
@@ -81,14 +88,14 @@ set(UI_SRC
 )
 
 add_executable(file-encryptor WIN32 src/main.c ${UI_SRC})
-target_link_libraries(file-encryptor PRIVATE crls_server ${GUI_LIBS})
+target_link_libraries(file-encryptor PRIVATE crls_server crls_cli ${GUI_LIBS})
 
 # The GUI executable has no console on Windows; this one runs the
 # command-line modes (--server, --upload) with one.
 if(WIN32)
   add_executable(file-encryptor-cli src/main.c ${UI_SRC})
   target_compile_definitions(file-encryptor-cli PRIVATE CRLS_CONSOLE)
-  target_link_libraries(file-encryptor-cli PRIVATE crls_server ${GUI_LIBS})
+  target_link_libraries(file-encryptor-cli PRIVATE crls_server crls_cli ${GUI_LIBS})
 endif()
 
 # ---------------- Tests ----------------
@@ -122,3 +129,8 @@ add_executable(test-remote tests/test_remote.c)
 target_link_libraries(test-remote PRIVATE server_fixture)
 add_test(NAME remote COMMAND test-remote)
 set_tests_properties(remote PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(test-cli tests/test_cli.c)
+target_link_libraries(test-cli PRIVATE server_fixture crls_cli)
+add_test(NAME cli COMMAND test-cli)
+set_tests_properties(cli PROPERTIES SKIP_RETURN_CODE 77)

@@ -7,6 +7,7 @@
  * |------------------------------------------|-------------------------------|
  * | file-encryptor                           | GUI                           |
  * | file-encryptor --server <folder> [...]   | HTTP server (server/server.h) |
+ * | file-encryptor --upload <url> <file>...  | Upload client (cli/cli.h)     |
  *
  * On Windows the GUI executable has no console, so the command-line modes are
  * meant to be run with file-encryptor-cli.exe, which is the same program built
@@ -20,6 +21,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "cli/cli.h"
 #include "core/archive.h"
 #include "server/server.h"
 #include "ui/ui.h"
@@ -38,8 +40,9 @@ static void redraw(void){
  * @brief Prints the command-line usage.
  */
 static void usage(void){
-  fprintf(stderr, "usage: file-encryptor                      start the GUI\n"
-                  "       file-encryptor --server <folder>    serve the .crls files of a folder\n"
+  fprintf(stderr, "usage: file-encryptor                          start the GUI\n"
+                  "       file-encryptor --server <folder>        serve the .crls files of a folder\n"
+                  "       file-encryptor --upload <url> <file>... add files to an archive at a URL\n"
                   "Run file-encryptor --server for the server options.\n");
 }
 
@@ -50,7 +53,15 @@ static void usage(void){
  * @return Process exit code.
  */
 static int run_command(int argc, char **argv){
+#if defined(_WIN32) && !defined(CRLS_CONSOLE)
+  /* The GUI executable has no console to print to or read a password from. */
+  (void) argc;
+  (void) argv;
+  platform_error("Run the command-line modes with file-encryptor-cli.exe.");
+  return 2;
+#endif
   if(strcmp(argv[1], "--server") == 0) return server_main(argc - 1, argv + 1);
+  if(strcmp(argv[1], "--upload") == 0) return cli_upload(argc - 1, argv + 1);
   usage();
   return strcmp(argv[1], "--help") == 0 ? 0 : 2;
 }
