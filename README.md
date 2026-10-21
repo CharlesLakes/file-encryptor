@@ -168,7 +168,7 @@ src/
     platform.h        window, events, drawing and fonts, independent of the OS
     platform_x11.cpp  ... implemented with Xlib
     platform_win32.cpp ... implemented with Win32/GDI
-    layout.cpp        app state, list geometry, which buttons each screen has
+    layout.cpp        list geometry, text fields, which buttons each screen has
     draw.cpp          painting of each screen
     actions.cpp       what each button / Enter does
     input.cpp         mouse and keyboard to actions
@@ -182,7 +182,7 @@ src/
     heap_buffer.h     large allocations that fail without aborting
     function_ref.h    non-owning callback parameter
 tests/
-  test_util.h/.cpp    CHECK(), CHECK_EQ(), temp_dir, files with known contents
+  test_util.h/.cpp    CHECK(), CHECK_EQ(), temp_dir, files with known contents, shared checks
   server_fixture.h/.cpp test_server: the server in a thread for the tests
   test_archive.cpp    the .crls format, versions 2 and 3
   test_append.cpp     signed uploads without a network
@@ -295,7 +295,8 @@ the new state and tries again.
   header with `@brief`, `@param` and `@return`, following `src/lib/heap_buffer.h`.
   All code, comments and UI text are in English.
 - **Secrets:** keep passwords and keys in `crls::secret` / `secret_text`
-  (`lib/secret.h`) and decrypted data in `secret_buffer`, which are wiped when
+  (`lib/secret.h`), passwords being typed in `secret_string`, and decrypted
+  data in `secret_buffer`, which are wiped when
   destroyed; never put them in `std::string` or a growing `std::vector`, which
   can leave copies behind. Wipe anything else with `sodium_memzero()`.
 - **C++ conventions:**
@@ -315,7 +316,17 @@ the new state and tries again.
   - **Types:** `enum class` instead of plain enums; `inline constexpr`
     constants instead of `#define` (the format constants keep their
     upper-case names); `std::span` and `std::string_view` for buffers and text
-    that are only read.
+    that are only read; results returned by value or in a `std::optional`
+    instead of output parameters.
+  - **Abstraction vs performance:** prefer the C++ form (`std::string`,
+    `std::array`, `<algorithm>`, RAII) whenever it costs nothing that matters.
+    Keep the C form only for a concrete reason, and say why in a comment: the
+    64 KB chunk buffers are static `std::array`s (too big for a Windows stack,
+    too costly to allocate per chunk), `set_status()` writes into a fixed buffer
+    because it runs after failed allocations, and the HTTP parser stores headers
+    in a fixed array so that requests cause no allocations. `std::filesystem`
+    and `std::format` are not used: `core/fs.h` is the operating system layer,
+    and both add size to the MinGW build.
 - **Editor setup:** clangd (LunarVim, VS Code, etc.) reads
   `build/compile_commands.json`, which CMake writes on every configure, to find
   the `src/` include path and flags.
