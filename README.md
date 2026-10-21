@@ -16,6 +16,8 @@ password.
   the code needs are written by hand in `src/deps/`, so you only need the
   runtime libraries.
 
+![Creating an archive, adding three files, a wrong password, the right one and extracting everything](docs/demo.gif)
+
 ## Build and run
 
 ### Linux
@@ -129,6 +131,9 @@ new file and the new index are sent; existing files are never sent again.
 
 ```
 CMakeLists.txt        build: core library, server, CLI, program and tests
+docs/
+  demo.gif            the animation above
+  record_demo.py      records demo.gif by driving the GUI (X11, wmctrl, xwd, Pillow)
 cmake/
   mingw-w64.cmake     toolchain file to cross-compile for Windows
 src/
