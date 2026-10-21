@@ -13,7 +13,7 @@
 app_state app;
 
 void app_init(void){
-  memset(&app, 0, sizeof(app));
+  app = app_state();
   app.screen = SCREEN_OPEN;
   app.entry_sel = -1;
   app.confirm_delete = -1;
@@ -52,7 +52,7 @@ void list_rect(int *x, int *y, int *w, int *h){
 }
 
 int list_count(void){
-  return (int) (app.screen == SCREEN_ARCHIVE ? app.arc.entries.n : app.files.items.n);
+  return (int) (app.screen == SCREEN_ARCHIVE ? app.arc.entries.size() : app.files.items.size());
 }
 
 int* list_sel(void){

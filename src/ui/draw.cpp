@@ -211,7 +211,7 @@ static void draw_archive_screen(void){
   char size_text[32], wasted_text[32], line[160];
   format_size(archive_total_size(a), size_text, sizeof(size_text));
   format_size(wasted, wasted_text, sizeof(wasted_text));
-  snprintf(line, sizeof(line), "%u file%s, %s", a->entries.n, a->entries.n == 1 ? "" : "s", size_text);
+  snprintf(line, sizeof(line), "%zu file%s, %s", a->entries.size(), a->entries.size() == 1 ? "" : "s", size_text);
   if(a->is_remote) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  remote: Add uploads");
   else if(wasted) snprintf(line + strlen(line), sizeof(line) - strlen(line), "  |  %s unused (Compact)", wasted_text);
   draw_text(FONT_REGULAR, MARGIN, 80, line, COLOR_MUTED);

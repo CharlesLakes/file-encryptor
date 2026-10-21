@@ -84,7 +84,7 @@ static void open_archive(void){
   if(remote ? !remote_open(&app.arc, path, app.password_field)
             : !archive_open(&app.arc, path, app.password_field)) return;
   clear_secrets();
-  unsigned int n = app.arc.entries.n;
+  unsigned int n = app.arc.entries.size();
   app.entry_sel = n ? 0 : -1;
   app.entry_scroll = 0;
   go_to(SCREEN_ARCHIVE, app.files.filter);
@@ -141,7 +141,7 @@ static void create_archive(void){
  */
 static void extract_to_current_dir(void){
   unsigned int from = app.extract_all ? 0 : (unsigned int) app.entry_sel;
-  unsigned int to = app.extract_all ? app.arc.entries.n : (unsigned int) app.entry_sel + 1;
+  unsigned int to = app.extract_all ? app.arc.entries.size() : (unsigned int) app.entry_sel + 1;
   int done = 0, skipped = 0, failed = 0;
 
   for(unsigned int i = from; i < to; i++){
@@ -171,7 +171,7 @@ static void delete_selected(void){
   }else{
     app.confirm_delete = -1;
     if(archive_delete_entry(&app.arc, (unsigned int) app.entry_sel)){
-      if(app.entry_sel >= (int) app.arc.entries.n) app.entry_sel = (int) app.arc.entries.n - 1;
+      if(app.entry_sel >= (int) app.arc.entries.size()) app.entry_sel = (int) app.arc.entries.size() - 1;
       clamp_scroll();
     }
   }
@@ -226,7 +226,7 @@ static void pick_confirm(void){
   set_status(false, remote ? "Encrypting and uploading %s..." : "Adding %s...", item->name);
   draw();
   if(remote ? remote_add_file(&app.arc, path) : archive_add_file(&app.arc, path)){
-    app.entry_sel = (int) app.arc.entries.n - 1;
+    app.entry_sel = (int) app.arc.entries.size() - 1;
     app.screen = SCREEN_ARCHIVE;
     ensure_visible();
   }
@@ -252,7 +252,7 @@ void handle_action(int action){
         set_status(true, "Select the file you want to extract.");
         break;
       }
-      if(app.arc.entries.n == 0){
+      if(app.arc.entries.size() == 0){
         set_status(true, "There are no files to extract.");
         break;
       }

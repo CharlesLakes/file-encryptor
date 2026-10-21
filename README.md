@@ -176,7 +176,6 @@ src/
     secret.h          fixed buffers for keys and passwords, wiped on destruction
     heap_buffer.h     large allocations that fail without aborting
     function_ref.h    non-owning callback parameter
-    vector.h/.cpp     generic dynamic array (copied from EDDs-in-C)
 tests/
   test_util.h/.cpp    CHECK(), temporary folders, files with known contents
   server_fixture.h/.cpp runs the server in a thread for the tests
@@ -283,7 +282,7 @@ the new state and tries again.
   throwing. Two-space indentation, `snake_case`, `static` for anything
   private to a file. Every file starts with a Doxygen block (`@file`, `@brief`,
   `@author`, `Maintainer:`) and public functions are documented in their
-  header with `@brief`, `@param` and `@return`, following `src/lib/vector.h`.
+  header with `@brief`, `@param` and `@return`, following `src/lib/heap_buffer.h`.
   All code, comments and UI text are in English.
 - **Secrets:** wipe passwords, keys and plaintext buffers with
   `sodium_memzero()` when you are done with them.

@@ -83,8 +83,8 @@ int main(void){
   stop_test_server();
 
   CHECK(archive_open(&a, crls, PASSWORD));
-  CHECK(a.entries.n == 2);
-  if(a.entries.n == 2){
+  CHECK(a.entries.size() == 2);
+  if(a.entries.size() == 2){
     CHECK(strcmp(archive_get_entry(&a, 0)->name, "one.bin") == 0);
     CHECK(strcmp(archive_get_entry(&a, 1)->name, "two.bin") == 0);
   }

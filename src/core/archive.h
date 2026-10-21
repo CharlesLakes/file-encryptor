@@ -74,8 +74,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <limits.h>
+#include <vector>
 #include "core/source.h"
-#include "lib/vector.h"
 
 #define MAGIC           "CRLS\0\0"        /**< Magic number at the start of every archive. */
 #define MAGIC_BYTES     6                 /**< Length of the magic number. */
@@ -123,7 +123,7 @@ typedef struct{
   int fd;                                      /**< File descriptor, held under an exclusive lock (local only). */
   archive_source src;                          /**< Where every read comes from. */
   char path[PATH_MAX];                         /**< Absolute path or URL of the archive. */
-  vector entries;                              /**< archive_entry elements, in index order. */
+  std::vector<archive_entry> entries;          /**< Entries in index order. */
   unsigned char key[KEY_BYTES];                /**< Derived encryption key. */
   unsigned char sign_sk[SIGN_SK_BYTES];        /**< Ed25519 secret key (version 3 only). */
   int version;                                 /**< Format version of the open archive. */
@@ -214,7 +214,7 @@ bool           archive_create_params(archive *a, const char *path, const char *p
 /**
  * @brief  Returns the entry at index. No bounds checking is performed.
  * @param  a     Archive.
- * @param  index Position of the entry, 0 <= index < a->entries.n.
+ * @param  index Position of the entry, 0 <= index < a->entries.size().
  * @return Pointer to the entry.
  */
 archive_entry* archive_get_entry(archive *a, unsigned int index);

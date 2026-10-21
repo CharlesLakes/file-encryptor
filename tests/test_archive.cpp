@@ -27,7 +27,7 @@ static void check_extract_all(archive *a, const char *out_name){
   char out[PATH_MAX];
   path_in(out, out_name);
   CHECK(make_dir(out) == 0);
-  for(unsigned int i = 0; i < a->entries.n; i++){
+  for(unsigned int i = 0; i < a->entries.size(); i++){
     const char *name = archive_get_entry(a, i)->name;
     CHECK(archive_extract_entry(a, i, out) == 1);
     CHECK(archive_extract_entry(a, i, out) == 0);   /* Already exists: skipped. */
@@ -71,8 +71,8 @@ static void check_v2_fixture(const char *fixtures){
   archive_init(&a);
   CHECK(!archive_open(&a, crls, "wrong-password"));
   CHECK(archive_open(&a, crls, "fixture-password"));
-  CHECK(a.entries.n == 3);
-  if(a.entries.n == 3){
+  CHECK(a.entries.size() == 3);
+  if(a.entries.size() == 3){
     CHECK(strcmp(archive_get_entry(&a, 0)->name, "empty.bin") == 0);
     CHECK(strcmp(archive_get_entry(&a, 1)->name, "small.txt") == 0);
     CHECK(strcmp(archive_get_entry(&a, 2)->name, "chunks.bin") == 0);
@@ -97,7 +97,7 @@ static void check_v2_fixture(const char *fixtures){
   CHECK(header_version(crls) == 3);
   CHECK(!archive_open(&a, crls, "wrong-password"));
   CHECK(archive_open(&a, crls, "fixture-password"));
-  CHECK(a.version == 3 && a.entries.n == 4);
+  CHECK(a.version == 3 && a.entries.size() == 4);
   check_extract_all(&a, "out_v2_compacted");
   archive_free(&a);
 }
@@ -165,7 +165,7 @@ int main(int argc, char **argv){
   path_in(file, "small.txt");
   CHECK(!archive_add_file(&a, file));                /* Duplicate name. */
   CHECK(!archive_add_file(&a, crls));                /* Itself. */
-  CHECK(a.entries.n == 4);
+  CHECK(a.entries.size() == 4);
   CHECK(archive_total_size(&a) == 1000 + CHUNK + 3*CHUNK + 123);
   CHECK(a.version == 3 && a.header_bytes == V3_HEADER_BYTES);
   archive_close(&a);
@@ -175,12 +175,12 @@ int main(int argc, char **argv){
   /* Reopen. */
   CHECK(!archive_open(&a, crls, "wrong-password"));
   CHECK(archive_open(&a, crls, "password123"));
-  CHECK(a.entries.n == 4);
+  CHECK(a.entries.size() == 4);
   check_extract_all(&a, "out1");
 
   /* Delete leaves unused space; compact reclaims it. */
   CHECK(archive_delete_entry(&a, 1));
-  CHECK(a.entries.n == 3);
+  CHECK(a.entries.size() == 3);
   CHECK(strcmp(archive_get_entry(&a, 1)->name, "exact.bin") == 0);
   CHECK(archive_wasted_space(&a) > 0);
   CHECK(archive_compact(&a));
@@ -188,7 +188,7 @@ int main(int argc, char **argv){
   archive_close(&a);
 
   CHECK(archive_open(&a, crls, "password123"));
-  CHECK(a.entries.n == 3);
+  CHECK(a.entries.size() == 3);
   check_extract_all(&a, "out2");
   archive_free(&a);
 

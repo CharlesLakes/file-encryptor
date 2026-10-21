@@ -287,12 +287,12 @@ int main(int argc, char **argv){
   /* The archive now holds the three files, readable with the password. */
   archive_init(&a);
   CHECK(archive_open(&a, crls, PASSWORD));
-  CHECK(a.entries.n == 3);
+  CHECK(a.entries.size() == 3);
   char out[PATH_MAX];
   path_in(out, "out");
   CHECK(make_dir(out) == 0);
   const char *names[] = {"first.bin", "second.bin", "third.bin"};
-  for(unsigned int i = 0; i < 3 && i < a.entries.n; i++){
+  for(unsigned int i = 0; i < 3 && i < a.entries.size(); i++){
     char original[PATH_MAX], extracted[PATH_MAX];
     CHECK(strcmp(archive_get_entry(&a, i)->name, names[i]) == 0);
     CHECK(archive_extract_entry(&a, i, out) == 1);

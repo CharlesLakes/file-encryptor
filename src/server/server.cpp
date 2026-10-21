@@ -131,13 +131,13 @@ static int serve_listing(const server_config *cfg, net_socket s, bool head_only)
   browser_load(&b);
 
   size_t size = 1, len = 0;
-  for(unsigned int i = 0; i < b.items.n; i++) size += strlen(browser_get_item(&b, i)->name) + 1;
+  for(unsigned int i = 0; i < b.items.size(); i++) size += strlen(browser_get_item(&b, i)->name) + 1;
   char *text = (char *) malloc(size);
   if(!text){
     browser_free(&b);
     return send_error(s, 500, "", head_only);
   }
-  for(unsigned int i = 0; i < b.items.n; i++){
+  for(unsigned int i = 0; i < b.items.size(); i++){
     dir_item *item = browser_get_item(&b, i);
     if(item->is_dir || !valid_archive_name(item->name)) continue;
     len += (size_t) snprintf(text + len, size - len, "%s\n", item->name);

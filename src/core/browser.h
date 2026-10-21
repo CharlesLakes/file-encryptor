@@ -19,7 +19,7 @@
 #include <stdbool.h>
 #include <limits.h>
 #include "core/archive.h"
-#include "lib/vector.h"
+#include <vector>
 
 /**
  * @brief Single entry of a directory listing.
@@ -43,7 +43,7 @@ enum{
  */
 typedef struct{
   char dir[PATH_MAX];        /**< Absolute path of the listed folder. */
-  vector items;              /**< dir_item elements. */
+  std::vector<dir_item> items;   /**< Entries of the folder, sorted. */
   int filter;                /**< One of the FILTER_* values. */
   int sel;                   /**< Selected row, or -1 if none. */
   int scroll;                /**< First visible row. */
@@ -77,7 +77,7 @@ void      browser_enter(browser *b, const char *name);
 /**
  * @brief  Returns the item at index. No bounds checking is performed.
  * @param  b     Browser.
- * @param  index Position of the item, 0 <= index < b->items.n.
+ * @param  index Position of the item, 0 <= index < b->items.size().
  * @return Pointer to the item.
  */
 dir_item* browser_get_item(browser *b, unsigned int index);

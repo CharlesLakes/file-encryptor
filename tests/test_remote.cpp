@@ -45,7 +45,7 @@ static void check_extract(archive *a, const char *out){
   char dir[PATH_MAX];
   path_in(dir, out);
   CHECK(make_dir(dir) == 0);
-  for(unsigned int i = 0; i < a->entries.n; i++){
+  for(unsigned int i = 0; i < a->entries.size(); i++){
     const char *name = archive_get_entry(a, i)->name;
     char original[PATH_MAX], extracted[PATH_MAX];
     CHECK(archive_extract_entry(a, i, dir) == 1);
@@ -86,7 +86,7 @@ int main(void){
 
   /* Without the password nothing is visible. */
   CHECK(!remote_open(&a, url, "wrong-password"));
-  CHECK(!a.is_open && a.entries.n == 0);
+  CHECK(!a.is_open && a.entries.size() == 0);
   if(strstr(status_text, "libcurl") != NULL){
     printf("SKIP: %s\n", status_text);
     stop_test_server();
@@ -96,7 +96,7 @@ int main(void){
 
   /* With it, the files are listed and extracted byte for byte. */
   CHECK(remote_open(&a, url, PASSWORD));
-  CHECK(a.is_remote && a.entries.n == 2);
+  CHECK(a.is_remote && a.entries.size() == 2);
   check_extract(&a, "out1");
 
   /* Uploading sends only the new file and the new index: the archive on the
@@ -104,7 +104,7 @@ int main(void){
   uint64_t before = size_of(crls);
   path_in(file, "upload-a.bin");
   CHECK(remote_add_file(&a, file));
-  CHECK(a.entries.n == 3);
+  CHECK(a.entries.size() == 3);
   archive_entry *added = archive_get_entry(&a, 2);
   CHECK(size_of(crls) == before + added->stored + a.index_length);
 
@@ -115,7 +115,7 @@ int main(void){
   CHECK(remote_add_file(&a, file));
   path_in(file, "upload-c.bin");
   CHECK(remote_add_file(&b, file));
-  CHECK(b.entries.n == 5);
+  CHECK(b.entries.size() == 5);
   archive_close(&b);
 
   /* A client that does not know the password cannot upload. */
@@ -132,7 +132,7 @@ int main(void){
   /* Everything is there when the archive is opened again, remotely or locally. */
   archive_close(&a);
   CHECK(remote_open(&a, url, PASSWORD));
-  CHECK(a.entries.n == 5);
+  CHECK(a.entries.size() == 5);
   check_extract(&a, "out2");
 
   /* Compacting the archive on the server replaces the file: the open remote
@@ -140,7 +140,7 @@ int main(void){
   archive local;
   archive_init(&local);
   CHECK(archive_open(&local, crls, PASSWORD));
-  CHECK(local.entries.n == 5);
+  CHECK(local.entries.size() == 5);
   CHECK(archive_delete_entry(&local, 4));
   CHECK(archive_compact(&local));
   archive_free(&local);

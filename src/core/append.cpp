@@ -117,7 +117,7 @@ bool append_rebase(archive *a, append_upload *up){
 }
 
 void append_applied(archive *a, const append_upload *up){
-  push_back_vector(&a->entries, (void *) &up->entry);
+  a->entries.push_back(up->entry);
   a->index_offset = up->claim.base + up->entry.stored;
   a->index_length = up->claim.index_length;
   memcpy(a->index_nonce, up->new_nonce, NONCE_BYTES);

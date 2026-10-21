@@ -87,11 +87,11 @@ static void check_contents(const char *crls, const char **names, unsigned int co
   archive a;
   archive_init(&a);
   CHECK(archive_open(&a, crls, PASSWORD));
-  CHECK(a.entries.n == count);
+  CHECK(a.entries.size() == count);
   char dir[PATH_MAX];
   path_in(dir, out);
   CHECK(make_dir(dir) == 0);
-  for(unsigned int i = 0; i < a.entries.n && i < count; i++){
+  for(unsigned int i = 0; i < a.entries.size() && i < count; i++){
     CHECK(strcmp(archive_get_entry(&a, i)->name, names[i]) == 0);
     CHECK(archive_extract_entry(&a, i, dir) == 1);
     char original[PATH_MAX], extracted[PATH_MAX];

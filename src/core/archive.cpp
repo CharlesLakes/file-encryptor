@@ -44,8 +44,7 @@ static uint64_t stored_size(uint64_t size){
  * @param a Archive.
  */
 static void clear_entries(archive *a){
-  free_vector(&a->entries);
-  a->entries = create_vector((unsigned int) sizeof(archive_entry));
+  a->entries.clear();
 }
 
 /**
@@ -106,7 +105,7 @@ static void remember_path(archive *a, const char *path){
 }
 
 int archive_find_entry(archive *a, const char *name){
-  for(unsigned int i = 0; i < a->entries.n; i++)
+  for(unsigned int i = 0; i < a->entries.size(); i++)
     if(strcmp(archive_get_entry(a, i)->name, name) == 0) return (int) i;
   return -1;
 }
@@ -126,10 +125,10 @@ static void set_layout(archive *a, int version){
 /* ---------------- Index ---------------- */
 
 bool archive_build_index(archive *a, const archive_entry *extra, unsigned char **blob_out, uint64_t *blob_size_out){
-  unsigned int count = a->entries.n + (extra ? 1 : 0);
+  unsigned int count = a->entries.size() + (extra ? 1 : 0);
   uint64_t plain_size = 4;
   for(unsigned int i = 0; i < count; i++){
-    const archive_entry *e = i < a->entries.n ? archive_get_entry(a, i) : extra;
+    const archive_entry *e = i < a->entries.size() ? archive_get_entry(a, i) : extra;
     plain_size += 2 + strlen(e->name) + 8 + 8 + 8 + STREAM_HEADER;
   }
   if(plain_size > MAX_INDEX){
@@ -151,7 +150,7 @@ bool archive_build_index(archive *a, const archive_entry *extra, unsigned char *
   put_le(p, count, 4);
   p += 4;
   for(unsigned int i = 0; i < count; i++){
-    const archive_entry *e = i < a->entries.n ? archive_get_entry(a, i) : extra;
+    const archive_entry *e = i < a->entries.size() ? archive_get_entry(a, i) : extra;
     size_t name_len = strlen(e->name);
     put_le(p, name_len, 2);
     p += 2;
@@ -242,7 +241,7 @@ static bool parse_index(archive *a, const unsigned char *p, uint64_t size, uint6
 
     if(e.size > total_size || e.stored != stored_size(e.size) || e.offset < a->header_bytes ||
        e.offset > total_size || e.stored > total_size - e.offset) return false;
-    push_back_vector(&a->entries, (void *) &e);
+    a->entries.push_back(e);
   }
   return p == end;
 }
@@ -264,10 +263,9 @@ bool archive_crypto_init(void){
 }
 
 void archive_init(archive *a){
-  memset(a, 0, sizeof(*a));
+  *a = archive();
   a->fd = -1;
   a->src.fd = -1;
-  a->entries = create_vector((unsigned int) sizeof(archive_entry));
 }
 
 void archive_close(archive *a){
@@ -284,7 +282,8 @@ void archive_close(archive *a){
 
 void archive_free(archive *a){
   archive_close(a);
-  free_vector(&a->entries);
+  /* clear() keeps the memory; swapping with an empty vector releases it. */
+  std::vector<archive_entry>().swap(a->entries);
 }
 
 /**
@@ -464,18 +463,18 @@ bool archive_create_params(archive *a, const char *path, const char *password, u
 /* ---------------- Queries ---------------- */
 
 archive_entry* archive_get_entry(archive *a, unsigned int index){
-  return (archive_entry *) get_value_vector(&a->entries, index);
+  return &a->entries[index];
 }
 
 uint64_t archive_total_size(archive *a){
   uint64_t total = 0;
-  for(unsigned int i = 0; i < a->entries.n; i++) total += archive_get_entry(a, i)->size;
+  for(unsigned int i = 0; i < a->entries.size(); i++) total += archive_get_entry(a, i)->size;
   return total;
 }
 
 uint64_t archive_wasted_space(archive *a){
   uint64_t used = a->header_bytes + a->index_length;
-  for(unsigned int i = 0; i < a->entries.n; i++) used += archive_get_entry(a, i)->stored;
+  for(unsigned int i = 0; i < a->entries.size(); i++) used += archive_get_entry(a, i)->stored;
   uint64_t total = a->src.size(&a->src);
   return total > used ? total - used : 0;
 }
@@ -554,9 +553,9 @@ bool archive_add_file(archive *a, const char *path){
     return false;
   }
 
-  push_back_vector(&a->entries, (void *) &e);
+  a->entries.push_back(e);
   if(!write_index_to(a, a->fd)){
-    a->entries.n--;
+    a->entries.pop_back();
     fs_truncate(a->fd, e.offset);
     return false;
   }
@@ -568,18 +567,12 @@ bool archive_add_file(archive *a, const char *path){
 }
 
 bool archive_delete_entry(archive *a, unsigned int index){
-  unsigned int size = a->entries.byte_size;
-  archive_entry removed = *archive_get_entry(a, index);
-  char *base = (char *) a->entries.arr;
-  memmove(base + size*index, base + size*(index+1), size*(a->entries.n - index - 1));
-  a->entries.n--;
+  archive_entry removed = a->entries[index];
+  a->entries.erase(a->entries.begin() + index);
 
   if(!write_index_to(a, a->fd)){
     /* Restore the entry at its original position. */
-    push_back_vector(&a->entries, (void *) &removed);
-    base = (char *) a->entries.arr;
-    memmove(base + size*(index+1), base + size*index, size*(a->entries.n - index - 1));
-    memcpy(base + size*index, &removed, size);
+    a->entries.insert(a->entries.begin() + index, removed);
     return false;
   }
 
@@ -729,15 +722,13 @@ bool archive_compact(archive *a){
   }
 
   /* Everything that compaction changes, to restore it on failure. */
-  unsigned int n = a->entries.n;
-  archive_entry *saved = (archive_entry *) malloc(sizeof(archive_entry) * (n ? n : 1));
+  std::vector<archive_entry> saved = a->entries;
   unsigned char saved_key[KEY_BYTES], saved_sk[SIGN_SK_BYTES], saved_ad[MAX_AD_BYTES];
   int saved_version = a->version;
   uint64_t saved_index_offset = a->index_offset, saved_index_length = a->index_length;
   memcpy(saved_key, a->key, KEY_BYTES);
   memcpy(saved_sk, a->sign_sk, SIGN_SK_BYTES);
   memcpy(saved_ad, a->header_ad, MAX_AD_BYTES);
-  if(saved) memcpy(saved, a->entries.arr, sizeof(archive_entry) * n);
 
   /* A version 2 archive is converted: its key is the master key of version 3. */
   bool upgrade = a->version < 3;
@@ -749,10 +740,10 @@ bool archive_compact(archive *a){
     derive_v3_keys(a, saved_key, header + 40);
     memcpy(a->header_ad, header, a->ad_len);
   }
-  bool ok = saved && write_at(fd, header, a->header_bytes, 0);
+  bool ok = write_at(fd, header, a->header_bytes, 0);
 
   uint64_t position = a->header_bytes;
-  for(unsigned int i = 0; ok && i < n; i++){
+  for(unsigned int i = 0; ok && i < a->entries.size(); i++){
     archive_entry *e = archive_get_entry(a, i);
     if(upgrade){
       ok = reencrypt_entry(a, e, saved_key, fd, position);
@@ -771,7 +762,7 @@ bool archive_compact(archive *a){
   ok = ok && write_index_to(a, fd) && fs_replace_file(tmp_path, &fd, a->path, &a->fd);
 
   if(!ok){
-    if(saved) memcpy(a->entries.arr, saved, sizeof(archive_entry) * n);
+    a->entries = saved;
     memcpy(a->key, saved_key, KEY_BYTES);
     memcpy(a->sign_sk, saved_sk, SIGN_SK_BYTES);
     memcpy(a->header_ad, saved_ad, MAX_AD_BYTES);
@@ -781,7 +772,6 @@ bool archive_compact(archive *a){
   }
   sodium_memzero(saved_key, sizeof(saved_key));
   sodium_memzero(saved_sk, sizeof(saved_sk));
-  free(saved);
 
   if(!ok){
     if(fd >= 0) close(fd);

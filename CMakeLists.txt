@@ -61,7 +61,6 @@ add_library(crls_core STATIC
   src/core/status.cpp
   src/core/util.cpp
   ${OS_SRC}
-  src/lib/vector.cpp
 )
 target_include_directories(crls_core PUBLIC src)
 target_compile_definitions(crls_core PUBLIC _DEFAULT_SOURCE ${PLATFORM_DEFS})

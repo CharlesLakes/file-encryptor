@@ -8,6 +8,7 @@
 
 #include "core/browser.h"
 
+#include <algorithm>
 #include <dirent.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -20,22 +21,21 @@
 #include "core/util.h"
 
 /**
- * @brief  qsort() comparator: ".." first, then folders, then files, each
+ * @brief  Order of the listing: ".." first, then folders, then files, each
  *         group in case-insensitive order.
- * @param  a First dir_item.
- * @param  b Second dir_item.
- * @return Negative, zero or positive, as required by qsort().
+ * @param  x First item.
+ * @param  y Second item.
+ * @return True if x goes before y.
  */
-static int compare_items(const void *a, const void *b){
-  const dir_item *x = (const dir_item *) a, *y = (const dir_item *) b;
-  if(strcmp(x->name, "..") == 0) return -1;
-  if(strcmp(y->name, "..") == 0) return 1;
-  if(x->is_dir != y->is_dir) return x->is_dir ? -1 : 1;
-  return strcasecmp(x->name, y->name);
+static bool item_before(const dir_item &x, const dir_item &y){
+  bool x_up = strcmp(x.name, "..") == 0, y_up = strcmp(y.name, "..") == 0;
+  if(x_up || y_up) return x_up && !y_up;
+  if(x.is_dir != y.is_dir) return x.is_dir;
+  return strcasecmp(x.name, y.name) < 0;
 }
 
 void browser_init(browser *b){
-  b->items = create_vector((unsigned int) sizeof(dir_item));
+  b->items.clear();
   b->filter = FILTER_CRLS;
   b->sel = -1;
   b->scroll = 0;
@@ -44,12 +44,11 @@ void browser_init(browser *b){
 }
 
 void browser_free(browser *b){
-  free_vector(&b->items);
+  std::vector<dir_item>().swap(b->items);
 }
 
 void browser_load(browser *b){
-  free_vector(&b->items);
-  b->items = create_vector((unsigned int) sizeof(dir_item));
+  b->items.clear();
   b->sel = -1;
   b->scroll = 0;
 
@@ -61,7 +60,7 @@ void browser_load(browser *b){
 
   if(!fs_is_root(b->dir)){
     dir_item up = {"..", true};
-    push_back_vector(&b->items, (void *) &up);
+    b->items.push_back(up);
   }
 
   struct dirent *ent;
@@ -80,12 +79,12 @@ void browser_load(browser *b){
     bool keep = item.is_dir;
     if(b->filter == FILTER_CRLS) keep = keep || (S_ISREG(info.st_mode) && has_crls_ext(item.name));
     if(b->filter == FILTER_ALL) keep = keep || S_ISREG(info.st_mode);
-    if(keep) push_back_vector(&b->items, (void *) &item);
+    if(keep) b->items.push_back(item);
   }
   closedir(dir);
 
-  qsort(b->items.arr, b->items.n, b->items.byte_size, compare_items);
-  if(b->items.n) b->sel = 0;
+  std::sort(b->items.begin(), b->items.end(), item_before);
+  if(!b->items.empty()) b->sel = 0;
 }
 
 void browser_enter(browser *b, const char *name){
@@ -100,5 +99,5 @@ void browser_enter(browser *b, const char *name){
 }
 
 dir_item* browser_get_item(browser *b, unsigned int index){
-  return (dir_item *) get_value_vector(&b->items, index);
+  return &b->items[index];
 }
