@@ -16,9 +16,7 @@
 #ifndef CORE_BROWSER_H
 #define CORE_BROWSER_H
 
-#include <stdbool.h>
-#include <limits.h>
-#include "core/archive.h"
+#include <string>
 #include <vector>
 
 namespace crls{
@@ -26,63 +24,57 @@ namespace crls{
 /**
  * @brief Single entry of a directory listing.
  */
-typedef struct{
-  char name[MAX_NAME + 1];   /**< Entry name. */
-  bool is_dir;               /**< True if the entry is a directory. */
-}dir_item;
-
-/**
- * @brief Listing filters. Directories are always included.
- */
-enum{
-  FILTER_CRLS,               /**< Regular files with the .crls extension. */
-  FILTER_ALL,                /**< All regular files. */
-  FILTER_DIRS                /**< Directories only. */
+struct dir_item{
+  std::string name;          /**< Entry name. */
+  bool is_dir = false;       /**< True if the entry is a directory. */
 };
 
 /**
- * @brief State of the directory browser.
+ * @brief Which entries besides folders are listed.
  */
-typedef struct{
-  char dir[PATH_MAX];        /**< Absolute path of the listed folder. */
-  std::vector<dir_item> items;   /**< Entries of the folder, sorted. */
-  int filter;                /**< One of the FILTER_* values. */
-  int sel;                   /**< Selected row, or -1 if none. */
-  int scroll;                /**< First visible row. */
-}browser;
+enum class browser_filter{
+  crls,                      /**< Regular files with the .crls extension. */
+  all,                       /**< All regular files. */
+  dirs                       /**< Directories only. */
+};
 
 /**
- * @brief Initializes the browser on the current working directory.
- * @param b Browser.
+ * @brief Listing of one folder, filtered and sorted, with a selection.
  */
-void      browser_init(browser *b);
+class browser{
+public:
+  /** @brief Moves to the current working directory and lists it. */
+  void open_cwd();
 
-/**
- * @brief Releases the memory owned by the browser.
- * @param b Browser.
- */
-void      browser_free(browser *b);
+  /** @brief Lists dir() again with the current filter and resets the selection and scroll. */
+  void load();
 
-/**
- * @brief Reloads b->dir using b->filter and resets the selection and scroll.
- * @param b Browser.
- */
-void      browser_load(browser *b);
+  /**
+   * @brief Changes into a subfolder (or ".."), relative to dir(), and lists it.
+   * @param name Name of the subfolder.
+   */
+  void enter(const std::string &name);
 
-/**
- * @brief Changes into the subfolder name (or ".."), relative to b->dir.
- * @param b    Browser.
- * @param name Name of the subfolder.
- */
-void      browser_enter(browser *b, const char *name);
+  /**
+   * @brief Sets the listed folder without listing it (call load() next).
+   * @param dir Absolute path of a folder.
+   */
+  void set_dir(std::string dir){ dir_ = std::move(dir); }
 
-/**
- * @brief  Returns the item at index. No bounds checking is performed.
- * @param  b     Browser.
- * @param  index Position of the item, 0 <= index < b->items.size().
- * @return Pointer to the item.
- */
-dir_item* browser_get_item(browser *b, unsigned int index);
+  /** @brief Absolute path of the listed folder. */
+  const std::string& dir() const noexcept{ return dir_; }
+
+  /** @brief Entries of the folder, sorted. */
+  const std::vector<dir_item>& items() const noexcept{ return items_; }
+
+  browser_filter filter = browser_filter::crls;  /**< Entries listed besides folders. */
+  int sel = -1;                                   /**< Selected row, or -1 if none. */
+  int scroll = 0;                                 /**< First visible row. */
+
+private:
+  std::string dir_ = "/";
+  std::vector<dir_item> items_;
+};
 
 }
 

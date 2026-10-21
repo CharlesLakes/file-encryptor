@@ -26,12 +26,11 @@ void app_init(void){
   app.focus = FIELD_PATH;
   app.last_click_time = 0;
   app.last_click_index = -1;
-  browser_init(&app.files);
+  app.files.open_cwd();
 }
 
 void app_free(void){
   app.arc.close();
-  browser_free(&app.files);
   clear_secrets();
 }
 
@@ -58,7 +57,7 @@ void list_rect(int *x, int *y, int *w, int *h){
 }
 
 int list_count(void){
-  return (int) (app.screen == SCREEN_ARCHIVE ? app.arc.entries().size() : app.files.items.size());
+  return (int) (app.screen == SCREEN_ARCHIVE ? app.arc.entries().size() : app.files.items().size());
 }
 
 int* list_sel(void){

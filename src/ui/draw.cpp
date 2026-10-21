@@ -113,9 +113,9 @@ static void draw_list(void){
       draw_text_fit(FONT_REGULAR, x + 12, row_y + text_y, w - size_w - 48, e.name.c_str(), false, COLOR_TEXT);
       draw_text(FONT_REGULAR, x + w - size_w - 20, row_y + text_y, size_text, COLOR_MUTED);
     }else{
-      dir_item *item = browser_get_item(&app.files, (unsigned int) i);
+      const dir_item *item = &app.files.items()[i];
       char label[MAX_NAME + 2];
-      snprintf(label, sizeof(label), item->is_dir ? "%s/" : "%s", item->name);
+      snprintf(label, sizeof(label), item->is_dir ? "%s/" : "%s", item->name.c_str());
       unsigned long color = item->is_dir ? COLOR_DIR : (has_crls_ext(item->name) ? COLOR_FILE : COLOR_TEXT);
       draw_text_fit(FONT_REGULAR, x + 12, row_y + text_y, w - 32, label, false, color);
     }
@@ -185,7 +185,7 @@ static void draw_buttons(void){
  */
 static void draw_folder_line(void){
   char line[PATH_MAX + 16];
-  snprintf(line, sizeof(line), "Folder: %s", app.files.dir);
+  snprintf(line, sizeof(line), "Folder: %s", app.files.dir().c_str());
   draw_text_fit(FONT_REGULAR, MARGIN, 60, platform_width() - 2*MARGIN, line, true, COLOR_MUTED);
 }
 

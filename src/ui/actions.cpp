@@ -34,20 +34,20 @@ void clear_secrets(void){
  */
 static void resolve_field_path(char *out, size_t out_size){
   if(remote_is_url(app.path_field) || fs_is_absolute(app.path_field)) snprintf(out, out_size, "%s", app.path_field);
-  else join_path(out, out_size, app.files.dir, app.path_field);
+  else join_path(out, out_size, app.files.dir().c_str(), app.path_field);
 }
 
 /**
  * @brief Switches to another screen. Browsing screens reload the folder with
  *        the given filter.
  * @param new_screen SCREEN_* value.
- * @param filter     FILTER_* value used by browsing screens.
+ * @param filter     Filter used by browsing screens.
  */
-static void go_to(int new_screen, int filter){
+static void go_to(int new_screen, browser_filter filter){
   app.screen = new_screen;
   if(new_screen != SCREEN_ARCHIVE){
     app.files.filter = filter;
-    browser_load(&app.files);
+    app.files.load();
   }
   clamp_scroll();
 }
@@ -57,8 +57,8 @@ static void go_to(int new_screen, int filter){
  */
 static void on_browser_select(void){
   if(app.screen != SCREEN_OPEN || app.files.sel < 0) return;
-  dir_item *item = browser_get_item(&app.files, (unsigned int) app.files.sel);
-  if(!item->is_dir) join_path(app.path_field, sizeof(app.path_field), app.files.dir, item->name);
+  const dir_item *item = &app.files.items()[app.files.sel];
+  if(!item->is_dir) join_path(app.path_field, sizeof(app.path_field), app.files.dir().c_str(), item->name.c_str());
 }
 
 /* ---------------- Actions ---------------- */
@@ -147,15 +147,15 @@ static void extract_to_current_dir(void){
   int done = 0, skipped = 0, failed = 0;
 
   for(unsigned int i = from; i < to; i++){
-    extract_result result = app.arc.extract(i, app.files.dir);
+    extract_result result = app.arc.extract(i, app.files.dir().c_str());
     if(result == extract_result::extracted) done++;
     else if(result == extract_result::skipped) skipped++;
     else failed++;
   }
 
   if(failed) return;
-  if(skipped) set_status(true, "Extracted %d. Skipped %d that already existed in %s.", done, skipped, app.files.dir);
-  else set_status(false, "Extracted %d file%s into %s.", done, done == 1 ? "" : "s", app.files.dir);
+  if(skipped) set_status(true, "Extracted %d. Skipped %d that already existed in %s.", done, skipped, app.files.dir().c_str());
+  else set_status(false, "Extracted %d file%s into %s.", done, done == 1 ? "" : "s", app.files.dir().c_str());
 }
 
 /**
@@ -217,15 +217,15 @@ static void pick_confirm(void){
     set_status(true, "Select a file.");
     return;
   }
-  dir_item *item = browser_get_item(&app.files, (unsigned int) app.files.sel);
+  const dir_item *item = &app.files.items()[app.files.sel];
   if(item->is_dir){
-    browser_enter(&app.files, item->name);
+    app.files.enter(item->name);
     return;
   }
   char path[PATH_MAX];
-  join_path(path, sizeof(path), app.files.dir, item->name);
+  join_path(path, sizeof(path), app.files.dir().c_str(), item->name.c_str());
   bool remote = app.arc.is_remote();
-  set_status(false, remote ? "Encrypting and uploading %s..." : "Adding %s...", item->name);
+  set_status(false, remote ? "Encrypting and uploading %s..." : "Adding %s...", item->name.c_str());
   draw();
   if(remote ? remote_add_file(&app.arc, path) : app.arc.add_file(path)){
     app.entry_sel = (int) app.arc.entries().size() - 1;
@@ -245,7 +245,7 @@ void handle_action(int action){
       create_archive();
       break;
     case ACT_ADD:
-      go_to(SCREEN_PICK_ADD, FILTER_ALL);
+      go_to(SCREEN_PICK_ADD, browser_filter::all);
       clear_status();
       break;
     case ACT_EXTRACT:
@@ -259,7 +259,7 @@ void handle_action(int action){
         break;
       }
       app.extract_all = action == ACT_EXTRACT_ALL;
-      go_to(SCREEN_PICK_EXTRACT, FILTER_DIRS);
+      go_to(SCREEN_PICK_EXTRACT, browser_filter::dirs);
       clear_status();
       break;
     case ACT_DELETE:
@@ -270,7 +270,7 @@ void handle_action(int action){
       break;
     case ACT_CLOSE:
       app.arc.close();
-      go_to(SCREEN_OPEN, FILTER_CRLS);
+      go_to(SCREEN_OPEN, browser_filter::crls);
       set_status(false, "Archive closed.");
       break;
     case ACT_PICK_CONFIRM:
@@ -294,9 +294,9 @@ void activate_selection(void){
     return;
   }
 
-  dir_item *item = browser_get_item(&app.files, (unsigned int) sel);
+  const dir_item *item = &app.files.items()[sel];
   if(item->is_dir){
-    browser_enter(&app.files, item->name);
+    app.files.enter(item->name);
   }else if(app.screen == SCREEN_OPEN){
     on_browser_select();
     app.focus = FIELD_PASSWORD;

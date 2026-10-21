@@ -24,6 +24,7 @@
 #include "core/httpmsg.h"
 #include "core/net.h"
 #include "core/util.h"
+#include "lib/heap_buffer.h"
 
 namespace crls{
 
@@ -130,27 +131,23 @@ static bool if_match_ok(const http_request *req, const char *etag){
  */
 static int serve_listing(const server_config *cfg, net_socket s, bool head_only){
   browser b;
-  browser_init(&b);
-  snprintf(b.dir, sizeof(b.dir), "%s", cfg->dir);
-  browser_load(&b);
+  b.set_dir(cfg->dir);
+  b.load();
 
+  /* The size depends on the folder, so the allocation is checked. */
   size_t size = 1, len = 0;
-  for(unsigned int i = 0; i < b.items.size(); i++) size += strlen(browser_get_item(&b, i)->name) + 1;
-  char *text = (char *) malloc(size);
-  if(!text){
-    browser_free(&b);
-    return send_error(s, 500, "", head_only);
+  for(const dir_item &item : b.items()) size += item.name.size() + 1;
+  heap_buffer text;
+  if(!text.allocate(size)) return send_error(s, 500, "", head_only);
+  for(const dir_item &item : b.items()){
+    if(item.is_dir || !valid_archive_name(item.name.c_str())) continue;
+    memcpy(text.data() + len, item.name.data(), item.name.size());
+    len += item.name.size();
+    text.data()[len++] = '\n';
   }
-  for(unsigned int i = 0; i < b.items.size(); i++){
-    dir_item *item = browser_get_item(&b, i);
-    if(item->is_dir || !valid_archive_name(item->name)) continue;
-    len += (size_t) snprintf(text + len, size - len, "%s\n", item->name);
-  }
-  browser_free(&b);
 
   send_head(s, 200, "text/plain; charset=utf-8", len, "Cache-Control: no-cache\r\n");
-  if(!head_only) net_send_all(s, text, len);
-  free(text);
+  if(!head_only) net_send_all(s, text.data(), len);
   return 200;
 }
 
