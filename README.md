@@ -264,7 +264,7 @@ the new state and tries again.
 
 - **Where things go:** format or crypto changes go in `core/archive.cpp`; the
   upload protocol in `core/append.cpp` (both sides) and `server/server.cpp`. A new
-  button means an `ACT_*` in `ui/ui.h`, an entry in `get_buttons()`
+  button means a `ui_action` value in `ui/ui.h`, an entry in `get_buttons()`
   (`layout.cpp`) and a `case` in `handle_action()` (`actions.cpp`). Painting goes
   in `draw.cpp`.
 - **Using a new libsodium, Xlib or libcurl function:** declare it in

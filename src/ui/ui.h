@@ -9,8 +9,8 @@
  *
  * The window displays one of four screens:
  *
- * | Screen              | Purpose                                              |
- * |---------------------|------------------------------------------------------|
+ * | Screen                  | Purpose                                              |
+ * |-------------------------|------------------------------------------------------|
  * | ui_screen::open         | Select a .crls file, enter the password, open/create |
  * | ui_screen::archive      | Contents of the open archive and its actions         |
  * | ui_screen::pick_add     | Folder browser to select the file to add             |

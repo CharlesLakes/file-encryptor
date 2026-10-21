@@ -238,6 +238,8 @@ void handle_action(ui_action action){
   if(action != ui_action::remove) app.confirm_delete = -1;
 
   switch(action){
+    case ui_action::none:
+      break;
     case ui_action::open:
       open_archive();
       break;
