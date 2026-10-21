@@ -244,7 +244,7 @@ void handle_action(int action){
       break;
     case ACT_ADD:
       go_to(SCREEN_PICK_ADD, FILTER_ALL);
-      set_status(false, "");
+      clear_status();
       break;
     case ACT_EXTRACT:
     case ACT_EXTRACT_ALL:
@@ -258,7 +258,7 @@ void handle_action(int action){
       }
       app.extract_all = action == ACT_EXTRACT_ALL;
       go_to(SCREEN_PICK_EXTRACT, FILTER_DIRS);
-      set_status(false, "");
+      clear_status();
       break;
     case ACT_DELETE:
       delete_selected();
@@ -276,7 +276,7 @@ void handle_action(int action){
       break;
     case ACT_PICK_CANCEL:
       app.screen = SCREEN_ARCHIVE;
-      set_status(false, "");
+      clear_status();
       break;
   }
 }

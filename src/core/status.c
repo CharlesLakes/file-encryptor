@@ -21,3 +21,8 @@ void set_status(bool error, const char *format, ...){
   va_end(args);
   status_error = error;
 }
+
+void clear_status(void){
+  status_text[0] = '\0';
+  status_error = false;
+}
