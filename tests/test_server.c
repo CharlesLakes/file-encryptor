@@ -6,8 +6,8 @@
  *
  * Maintainer: @CharlesLakes
  *
- * The server runs in a second thread of this process. The only argument is
- * the folder holding tests/fixtures/v2.crls.
+ * The server runs in a second thread of this process (see server_fixture.h).
+ * The only argument is the folder holding tests/fixtures/v2.crls.
  */
 
 #include <stdio.h>
@@ -20,35 +20,12 @@
 #include "core/httpmsg.h"
 #include "core/net.h"
 #include "core/util.h"
-#include "server/server.h"
+#include "server_fixture.h"
 #include "test_util.h"
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <pthread.h>
-#endif
 
 #define PASSWORD "server-password"
 
-static server_config cfg;
-static volatile int stop_server = 0;
 static int port;
-
-/** @brief Thread body: runs the server until stop_server is set. */
-#ifdef _WIN32
-static DWORD WINAPI server_thread(LPVOID arg){
-  (void) arg;
-  server_run(&cfg);
-  return 0;
-}
-#else
-static void* server_thread(void *arg){
-  (void) arg;
-  server_run(&cfg);
-  return NULL;
-}
-#endif
 
 /** @brief A response read by request(). */
 typedef struct{
@@ -195,7 +172,7 @@ int main(int argc, char **argv){
 
   /* The served folder: a version 3 archive, the version 2 fixture and a file
      that must not be served. */
-  char served[PATH_MAX], crls[PATH_MAX], file[PATH_MAX], source[PATH_MAX], v2[PATH_MAX], port_file[PATH_MAX];
+  char served[PATH_MAX], crls[PATH_MAX], file[PATH_MAX], source[PATH_MAX], v2[PATH_MAX];
   path_in(served, "served");
   CHECK(make_dir(served) == 0);
   join_path(crls, sizeof(crls), served, "remote.crls");
@@ -214,22 +191,7 @@ int main(int argc, char **argv){
   CHECK(archive_add_file(&a, file));
   archive_close(&a);
 
-  path_in(port_file, "port");
-  cfg = (server_config){served, "127.0.0.1", 0, 64ULL << 20, 5, port_file, &stop_server};
-#ifdef _WIN32
-  HANDLE thread = CreateThread(NULL, 0, server_thread, NULL, 0, NULL);
-#else
-  pthread_t thread;
-  pthread_create(&thread, NULL, server_thread, NULL);
-#endif
-  for(int i = 0; i < 100 && port == 0; i++){
-    FILE *f = fopen(port_file, "r");
-    if(f){
-      if(fscanf(f, "%d", &port) != 1) port = 0;
-      fclose(f);
-    }
-    if(port == 0) usleep(20000);
-  }
+  port = start_test_server(served);
   CHECK(port > 0);
 
   response r;
@@ -340,15 +302,7 @@ int main(int argc, char **argv){
   }
   archive_free(&a);
 
-  /* Stop the server: set the flag, then wake up accept() with a connection. */
-  stop_server = 1;
-  get("HEAD", "/", "", &r);
-  free(r.body);
-#ifdef _WIN32
-  WaitForSingleObject(thread, INFINITE);
-#else
-  pthread_join(thread, NULL);
-#endif
+  stop_test_server();
 
   remove_temp_dir();
   return test_summary();

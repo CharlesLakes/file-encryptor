@@ -119,6 +119,7 @@ typedef struct{
  */
 typedef struct{
   bool is_open;                                /**< True while an archive is open. */
+  bool is_remote;                              /**< True if it was opened from a URL (see remote.h). */
   int fd;                                      /**< File descriptor, held under an exclusive lock (local only). */
   archive_source src;                          /**< Where every read comes from. */
   char path[PATH_MAX];                         /**< Absolute path or URL of the archive. */
@@ -168,6 +169,25 @@ void           archive_free(archive *a);
  * @return True on success, false otherwise.
  */
 bool           archive_open(archive *a, const char *path, const char *password);
+
+/**
+ * @brief  Opens an archive from a byte source already set in a->src (used for
+ *         URLs, see remote.h). The archive is read-only through this module:
+ *         files are added with signed uploads instead.
+ * @param  a        Archive with its source set.
+ * @param  name     Name or URL of the archive, kept in a->path.
+ * @param  password Password used to derive the key.
+ * @return True on success, false otherwise.
+ */
+bool           archive_open_source(archive *a, const char *name, const char *password);
+
+/**
+ * @brief  Reads the header and the index again with the keys already derived,
+ *         after the archive changed (e.g. another client uploaded a file).
+ * @param  a Open archive.
+ * @return True on success, false otherwise.
+ */
+bool           archive_reload(archive *a);
 
 /**
  * @brief  Creates a new, empty archive. Fails if path already exists.

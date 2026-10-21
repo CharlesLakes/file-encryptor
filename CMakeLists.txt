@@ -28,19 +28,20 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ---------------- Platform ----------------
 
 if(WIN32)
-  set(OS_SRC  src/core/fs_win32.c src/core/net_win32.c)
+  set(OS_SRC  src/core/fs_win32.c src/core/net_win32.c src/core/http_winhttp.c)
   set(GUI_SRC src/ui/platform_win32.c)
   find_library(SODIUM_LIB NAMES sodium libsodium REQUIRED)
-  set(SYSTEM_LIBS ws2_32)
+  set(SYSTEM_LIBS ws2_32 winhttp)
   set(GUI_LIBS gdi32 user32)
   set(PLATFORM_DEFS __USE_MINGW_ANSI_STDIO=1)
 else()
-  set(OS_SRC  src/core/fs_posix.c src/core/net_posix.c)
+  set(OS_SRC  src/core/fs_posix.c src/core/net_posix.c src/core/http_curl.c)
   set(GUI_SRC src/ui/platform_x11.c)
   # Link the runtime libraries by their exact file names.
   find_library(SODIUM_LIB NAMES libsodium.so.23 sodium REQUIRED)
   find_library(X11_LIB NAMES libX11.so.6 X11 REQUIRED)
-  set(SYSTEM_LIBS "")
+  # libcurl is loaded with dlopen() (see src/deps/curl.h).
+  set(SYSTEM_LIBS ${CMAKE_DL_LIBS})
   set(GUI_LIBS ${X11_LIB})
   set(PLATFORM_DEFS "")
 endif()
@@ -52,6 +53,7 @@ add_library(crls_core STATIC
   src/core/archive.c
   src/core/browser.c
   src/core/httpmsg.c
+  src/core/remote.c
   src/core/source.c
   src/core/status.c
   src/core/util.c
@@ -109,6 +111,14 @@ target_link_libraries(test-httpmsg PRIVATE test_util)
 add_test(NAME httpmsg COMMAND test-httpmsg)
 
 find_package(Threads REQUIRED)
+add_library(server_fixture STATIC tests/server_fixture.c)
+target_link_libraries(server_fixture PUBLIC test_util crls_server Threads::Threads)
+
 add_executable(test-server tests/test_server.c)
-target_link_libraries(test-server PRIVATE test_util crls_server Threads::Threads)
+target_link_libraries(test-server PRIVATE server_fixture)
 add_test(NAME server COMMAND test-server ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
+
+add_executable(test-remote tests/test_remote.c)
+target_link_libraries(test-remote PRIVATE server_fixture)
+add_test(NAME remote COMMAND test-remote)
+set_tests_properties(remote PROPERTIES SKIP_RETURN_CODE 77)

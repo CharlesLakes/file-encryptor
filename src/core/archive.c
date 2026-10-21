@@ -278,6 +278,7 @@ void archive_close(archive *a){
   if(a->fd >= 0) close(a->fd);
   a->fd = -1;
   a->is_open = false;
+  a->is_remote = false;
   a->path[0] = '\0';
 }
 
@@ -294,7 +295,8 @@ void archive_free(archive *a){
  *
  * @param  a        Archive whose source is ready.
  * @param  name     Name of the archive for error messages.
- * @param  password Password used to derive the key.
+ * @param  password Password used to derive the key, or NULL to keep the keys
+ *                  already in a (reloading an archive that changed).
  * @return True on success, false otherwise.
  */
 static bool load_from_source(archive *a, const char *name, const char *password){
@@ -336,7 +338,7 @@ static bool load_from_source(archive *a, const char *name, const char *password)
 
   /* A wrong password, or a tampered public key, makes the index fail to decrypt. */
   unsigned char pk[SIGN_PK_BYTES];
-  if(!derive_keys(a, password, header, pk)){
+  if(password && !derive_keys(a, password, header, pk)){
     free(blob);
     free(plain);
     set_status(true, "Not enough memory to derive the key.");
@@ -361,8 +363,10 @@ static bool load_from_source(archive *a, const char *name, const char *password)
   free(plain);
 
   if(!ok){
-    sodium_memzero(a->key, sizeof(a->key));
-    sodium_memzero(a->sign_sk, sizeof(a->sign_sk));
+    if(password){
+      sodium_memzero(a->key, sizeof(a->key));
+      sodium_memzero(a->sign_sk, sizeof(a->sign_sk));
+    }
     return false;
   }
 
@@ -395,6 +399,18 @@ bool archive_open(archive *a, const char *path, const char *password){
   a->is_open = true;
   remember_path(a, path);
   return true;
+}
+
+bool archive_open_source(archive *a, const char *name, const char *password){
+  if(!load_from_source(a, name, password)) return false;
+  a->is_open = true;
+  a->is_remote = true;
+  snprintf(a->path, sizeof(a->path), "%s", name);
+  return true;
+}
+
+bool archive_reload(archive *a){
+  return load_from_source(a, a->path, NULL);
 }
 
 bool archive_create(archive *a, const char *path, const char *password){
@@ -583,54 +599,76 @@ bool archive_delete_entry(archive *a, unsigned int index){
  */
 typedef bool (*chunk_sink)(void *ctx, const unsigned char *plain, size_t len, bool final);
 
+/** @brief Why pull_entry() stopped. */
+typedef enum{
+  PULL_OK,                   /**< The whole entry was decrypted. */
+  PULL_DAMAGED,              /**< The ciphertext does not decrypt or is truncated. */
+  PULL_READ_ERROR,           /**< The source could not be read (it may have set the status). */
+  PULL_SINK_ERROR            /**< The sink failed. */
+}pull_result;
+
 /**
  * @brief  Decrypts an entry chunk by chunk and passes each chunk to sink.
- * @param  a       Archive the entry is read from.
- * @param  e       Entry.
- * @param  key     Key the entry was encrypted with.
- * @param  sink    Receiver of the plaintext.
- * @param  ctx     State of the receiver.
- * @param  damaged Output: on failure, true if the ciphertext was at fault and
- *                 false if the sink was.
- * @return True on success, false otherwise.
+ * @param  a    Archive the entry is read from.
+ * @param  e    Entry.
+ * @param  key  Key the entry was encrypted with.
+ * @param  sink Receiver of the plaintext.
+ * @param  ctx  State of the receiver.
+ * @return PULL_OK on success, or the reason of the failure.
  */
-static bool pull_entry(archive *a, const archive_entry *e, const unsigned char *key,
-                       chunk_sink sink, void *ctx, bool *damaged){
+static pull_result pull_entry(archive *a, const archive_entry *e, const unsigned char *key,
+                              chunk_sink sink, void *ctx){
   crypto_secretstream_xchacha20poly1305_state state;
-  bool ok = crypto_secretstream_xchacha20poly1305_init_pull(&state, e->stream_header, key) == 0;
+  pull_result result = crypto_secretstream_xchacha20poly1305_init_pull(&state, e->stream_header, key) == 0
+                       ? PULL_OK : PULL_DAMAGED;
   bool final = false;
   uint64_t consumed = 0, produced = 0;
-  *damaged = !ok;
 
-  while(ok && !final){
+  while(result == PULL_OK && !final){
     uint64_t left = e->stored - consumed;
     size_t n = left < sizeof(cipher_chunk) ? (size_t) left : sizeof(cipher_chunk);
     unsigned long long plain_size;
     unsigned char tag;
-    if(n < STREAM_ABYTES || !a->src.read_at(&a->src, cipher_chunk, n, e->offset + consumed) ||
-       crypto_secretstream_xchacha20poly1305_pull(&state, plain_chunk, &plain_size, &tag,
+    if(n < STREAM_ABYTES){
+      result = PULL_DAMAGED;
+      break;
+    }
+    if(!a->src.read_at(&a->src, cipher_chunk, n, e->offset + consumed)){
+      result = PULL_READ_ERROR;
+      break;
+    }
+    if(crypto_secretstream_xchacha20poly1305_pull(&state, plain_chunk, &plain_size, &tag,
                                                   cipher_chunk, n, NULL, 0) != 0){
-      ok = false;
-      *damaged = true;
+      result = PULL_DAMAGED;
       break;
     }
     consumed += n;
     final = tag == crypto_secretstream_xchacha20poly1305_tag_final();
     if(final != (consumed == e->stored)){
-      ok = false;
-      *damaged = true;
+      result = PULL_DAMAGED;
       break;
     }
     produced += plain_size;
-    ok = sink(ctx, plain_chunk, (size_t) plain_size, final);
+    if(!sink(ctx, plain_chunk, (size_t) plain_size, final)) result = PULL_SINK_ERROR;
   }
-  if(ok && produced != e->size){
-    ok = false;
-    *damaged = true;
-  }
+  if(result == PULL_OK && produced != e->size) result = PULL_DAMAGED;
   sodium_memzero(plain_chunk, sizeof(plain_chunk));
   sodium_memzero(&state, sizeof(state));
-  return ok;
+  return result;
+}
+
+/**
+ * @brief Sets the status message for a failed pull_entry() of entry e.
+ * @param a      Archive.
+ * @param e      Entry.
+ * @param result Failure.
+ * @param target Path being written, for PULL_SINK_ERROR.
+ */
+static void report_pull_error(archive *a, const archive_entry *e, pull_result result, const char *target){
+  if(result == PULL_DAMAGED) set_status(true, "The content of %s is damaged.", e->name);
+  else if(result == PULL_SINK_ERROR) set_status(true, "Could not write %s.", target);
+  /* A remote source explains its own failures (e.g. the archive changed on the server). */
+  else if(!a->is_remote) set_status(true, "Could not read %s.", a->path);
 }
 
 /** @brief State of push_sink(). */
@@ -670,11 +708,11 @@ static bool reencrypt_entry(archive *a, archive_entry *e, const unsigned char *o
   c.position = position;
   crypto_secretstream_xchacha20poly1305_init_push(&c.state, stream_header, a->key);
 
-  bool damaged;
-  bool ok = pull_entry(a, e, old_key, push_sink, &c, &damaged) && c.position - position == e->stored;
+  pull_result result = pull_entry(a, e, old_key, push_sink, &c);
+  bool ok = result == PULL_OK && c.position - position == e->stored;
   sodium_memzero(&c.state, sizeof(c.state));
   if(ok) memcpy(e->stream_header, stream_header, STREAM_HEADER);
-  else if(damaged) set_status(true, "The content of %s is damaged.", e->name);
+  else if(result != PULL_OK) report_pull_error(a, e, result, a->path);
   return ok;
 }
 
@@ -796,13 +834,11 @@ int archive_extract_entry(archive *a, unsigned int index, const char *dir){
     return -1;
   }
 
-  bool damaged;
-  bool ok = pull_entry(a, e, a->key, file_sink, &c, &damaged);
-  ok = close(c.fd) == 0 && ok;
-  if(!ok){
+  pull_result result = pull_entry(a, e, a->key, file_sink, &c);
+  if(close(c.fd) != 0 && result == PULL_OK) result = PULL_SINK_ERROR;
+  if(result != PULL_OK){
     unlink(path);
-    if(damaged) set_status(true, "The content of %s is damaged.", e->name);
-    else set_status(true, "Could not write %s.", path);
+    report_pull_error(a, e, result, path);
     return -1;
   }
   return 1;
