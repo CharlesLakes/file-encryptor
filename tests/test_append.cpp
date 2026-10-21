@@ -1,6 +1,6 @@
 /**
  * @file    test_append.cpp
- * @brief   Tests of signed appends (core/append.c), with the client and the
+ * @brief   Tests of signed appends (core/append.cpp), with the client and the
  *          server side in the same process and no network.
  * @author  @CharlesLakes
  *

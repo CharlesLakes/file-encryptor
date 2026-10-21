@@ -14,7 +14,7 @@ that newer versions can be checked to still open it.
 - SHA-256: `635488050bc09eeaa6620514970adb20ef47e4de7a3275938767a8e007fd0b80`
 
 The contents of each entry are produced by `make_file()` in
-`tests/test_archive.c` (xorshift32 seeded with `seed * 2654435761 + 1`), so the
+`tests/test_util.cpp` (xorshift32 seeded with `seed * 2654435761 + 1`), so the
 test regenerates the originals and compares them with the extracted files.
 
 Never regenerate this file with newer code: its purpose is to be old.

@@ -13,8 +13,8 @@
  *
  * | File          | Platform              |
  * |---------------|-----------------------|
- * | fs_posix.c    | Linux and other POSIX |
- * | fs_win32.c    | Windows (MinGW-w64)   |
+ * | fs_posix.cpp  | Linux and other POSIX |
+ * | fs_win32.cpp  | Windows (MinGW-w64)   |
  *
  * File descriptors are the ones returned by open(). Every call to open() must
  * include O_BINARY, which is defined as 0 on systems that do not need it.

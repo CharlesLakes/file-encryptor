@@ -7,13 +7,13 @@
  *
  * @section http_overview Overview
  *
- * One blocking request at a time, used by remote.c. The implementation is
+ * One blocking request at a time, used by remote.cpp. The implementation is
  * selected at build time:
  *
  * | File            | Platform                                   |
  * |-----------------|--------------------------------------------|
- * | http_curl.c     | Linux: libcurl, loaded at run time         |
- * | http_winhttp.c  | Windows: WinHTTP, part of the system       |
+ * | http_curl.cpp   | Linux: libcurl, loaded at run time         |
+ * | http_winhttp.cpp  | Windows: WinHTTP, part of the system       |
  *
  * Both only allow http and https, verify certificates, never follow
  * redirects and never ask for compressed responses (which would change the

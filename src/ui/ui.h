@@ -18,9 +18,9 @@
  *
  * @section ui_flow Event Flow
  *
- * main.c receives each event from the platform layer (platform.h), input.c
- * translates it into an action, actions.c executes it (delegating to
- * core/archive.c) and draw.c repaints the window.
+ * main.cpp receives each event from the platform layer (platform.h), input.cpp
+ * translates it into an action, actions.cpp executes it (delegating to
+ * core/archive.cpp) and draw.cpp repaints the window.
  *
  * @section ui_files Source Files
  *
@@ -134,7 +134,7 @@ typedef struct{
 }app_state;
 
 
-/* ---------------- layout.c ---------------- */
+/* ---------------- layout.cpp ---------------- */
 
 /**
  * @brief Initializes the application state on ui_screen::open.
@@ -230,7 +230,7 @@ void field_rect(ui_field field, int *x, int *y, int *w, int *h);
  */
 int  get_buttons(app_state &app, button *b);
 
-/* ---------------- draw.c ---------------- */
+/* ---------------- draw.cpp ---------------- */
 
 /**
  * @brief Repaints the whole window.
@@ -238,7 +238,7 @@ int  get_buttons(app_state &app, button *b);
  */
 void draw(app_state &app);
 
-/* ---------------- actions.c ---------------- */
+/* ---------------- actions.cpp ---------------- */
 
 /**
  * @brief Executes an action.
@@ -273,7 +273,7 @@ void select_row(app_state &app, int index);
  */
 void clear_secrets(app_state &app);
 
-/* ---------------- input.c ---------------- */
+/* ---------------- input.cpp ---------------- */
 
 /**
  * @brief Handles a mouse click or wheel event.

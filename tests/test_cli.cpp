@@ -1,6 +1,6 @@
 /**
  * @file    test_cli.cpp
- * @brief   Tests of `--upload` (cli/cli.c) against the built-in server, with
+ * @brief   Tests of `--upload` (cli/cli.cpp) against the built-in server, with
  *          the password given on standard input as a script would.
  * @author  @CharlesLakes
  *

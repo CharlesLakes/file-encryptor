@@ -12,8 +12,8 @@
  *
  * | File          | Platform              |
  * |---------------|-----------------------|
- * | net_posix.c   | Linux and other POSIX |
- * | net_win32.c   | Windows (Winsock 2)   |
+ * | net_posix.cpp | Linux and other POSIX |
+ * | net_win32.cpp | Windows (Winsock 2)   |
  */
 
 #ifndef CORE_NET_H

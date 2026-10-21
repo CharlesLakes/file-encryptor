@@ -269,8 +269,9 @@ the new state and tries again.
   (`layout.cpp`) and a `case` in `handle_action()` (`actions.cpp`). Painting goes
   in `draw.cpp`.
 - **Using a new libsodium, Xlib or libcurl function:** declare it in
-  `src/deps/` with the exact signature from the real header. libcurl options
-  must go through the typed wrappers in `http_curl.cpp`.
+  `src/deps/`, inside the `extern "C"` block, with the exact signature from the
+  real header. libcurl options must go through the typed wrappers in
+  `http_curl.cpp`.
 - **Operating system specific code:** files and paths go in `core/fs.h`,
   sockets in `core/net.h`, HTTP clients in `core/http.h`, password prompts in
   `cli/tty.h` and windowing in `ui/platform.h`, each with one implementation
@@ -288,8 +289,28 @@ the new state and tries again.
   `@author`, `Maintainer:`) and public functions are documented in their
   header with `@brief`, `@param` and `@return`, following `src/lib/heap_buffer.h`.
   All code, comments and UI text are in English.
-- **Secrets:** wipe passwords, keys and plaintext buffers with
-  `sodium_memzero()` when you are done with them.
+- **Secrets:** keep passwords and keys in `crls::secret` / `secret_text`
+  (`lib/secret.h`) and decrypted data in `secret_buffer`, which are wiped when
+  destroyed; never put them in `std::string` or a growing `std::vector`, which
+  can leave copies behind. Wipe anything else with `sodium_memzero()`.
+- **C++ conventions:**
+  - **Errors:** no exceptions and no RTTI. A function that can fail returns
+    `false`, `std::nullopt` or an `enum class` error value after calling
+    `set_status()`, and is marked `[[nodiscard]]`.
+  - **Allocations:** a failed `std::vector` or `std::string` allocation ends
+    the program, which is fine for small sizes. A size that comes from a file
+    or the network goes through `crls::heap_buffer::allocate()`, which can
+    fail and be reported.
+  - **Ownership:** resources have an owner that releases them: `unique_fd`,
+    `unique_socket`, `std::unique_ptr` with a deleter for library handles, and
+    the `archive` and `append_upload` classes.
+  - **Callbacks:** callback parameters are `crls::function_ref`. Never pass a
+    `std::string` or another class through `...` (`set_status()`,
+    `curl_easy_setopt()`); `set_status()` is format-checked by the compiler.
+  - **Types:** `enum class` instead of plain enums; `inline constexpr`
+    constants instead of `#define` (the format constants keep their
+    upper-case names); `std::span` and `std::string_view` for buffers and text
+    that are only read.
 - **Editor setup:** clangd (LunarVim, VS Code, etc.) reads
   `build/compile_commands.json`, which CMake writes on every configure, to find
   the `src/` include path and flags.

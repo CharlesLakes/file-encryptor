@@ -1,6 +1,6 @@
 /**
  * @file    test_archive.cpp
- * @brief   End-to-end tests of core/archive.c, run in a temporary folder.
+ * @brief   End-to-end tests of core/archive.cpp, run in a temporary folder.
  * @author  @CharlesLakes
  *
  * Maintainer: @CharlesLakes

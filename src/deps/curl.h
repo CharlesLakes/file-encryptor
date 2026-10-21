@@ -16,7 +16,7 @@
  * below are declared variadic too, because calling a variadic function through
  * a non-variadic pointer is undefined behavior. Without the type-checking
  * macros of the real header, every argument must have exactly the type the
- * option expects (long, a pointer, curl_off_t or a callback); http_curl.c only
+ * option expects (long, a pointer, curl_off_t or a callback); http_curl.cpp only
  * passes them through typed wrappers.
  *
  * Option numbers are copied from include/curl/curl.h of libcurl 7.85+, where

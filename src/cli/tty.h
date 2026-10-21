@@ -7,8 +7,8 @@
  *
  * | File          | Platform                                       |
  * |---------------|------------------------------------------------|
- * | tty_posix.c   | termios on /dev/tty                            |
- * | tty_win32.c   | console mode without ENABLE_ECHO_INPUT         |
+ * | tty_posix.cpp | termios on /dev/tty                            |
+ * | tty_win32.cpp | console mode without ENABLE_ECHO_INPUT         |
  */
 
 #ifndef CLI_TTY_H

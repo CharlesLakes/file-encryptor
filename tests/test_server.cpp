@@ -1,6 +1,6 @@
 /**
  * @file    test_server.cpp
- * @brief   End-to-end tests of the HTTP server (server/server.c) over real
+ * @brief   End-to-end tests of the HTTP server (server/server.cpp) over real
  *          sockets on 127.0.0.1.
  * @author  @CharlesLakes
  *

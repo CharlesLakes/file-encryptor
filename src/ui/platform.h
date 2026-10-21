@@ -13,8 +13,8 @@
  *
  * | File               | Backend                 |
  * |--------------------|-------------------------|
- * | platform_x11.c     | Xlib (Linux)            |
- * | platform_win32.c   | Win32 and GDI (Windows) |
+ * | platform_x11.cpp   | Xlib (Linux)            |
+ * | platform_win32.cpp | Win32 and GDI (Windows) |
  *
  * All drawing goes to an off-screen buffer as large as the client area of the
  * window, which platform_present() copies to the window. The buffer follows

@@ -1,6 +1,6 @@
 /**
  * @file    test_remote.cpp
- * @brief   End-to-end tests of archives at URLs (core/remote.c) against the
+ * @brief   End-to-end tests of archives at URLs (core/remote.cpp) against the
  *          built-in server on http://127.0.0.1.
  * @author  @CharlesLakes
  *
