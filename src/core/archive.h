@@ -131,6 +131,7 @@ typedef struct{
   unsigned int pointer_pos;                    /**< Offset of the index offset and length. */
   unsigned char header_ad[MAX_AD_BYTES];       /**< Associated data (start of the header). */
   uint64_t index_offset, index_length;         /**< Location of the current index. */
+  unsigned char index_nonce[NONCE_BYTES];      /**< Nonce of the current index; identifies its state. */
 }archive;
 
 /**
@@ -199,6 +200,14 @@ bool           archive_create_params(archive *a, const char *path, const char *p
 archive_entry* archive_get_entry(archive *a, unsigned int index);
 
 /**
+ * @brief  Looks up an entry by name.
+ * @param  a    Archive.
+ * @param  name File name.
+ * @return Index of the entry, or -1 if not found.
+ */
+int            archive_find_entry(archive *a, const char *name);
+
+/**
  * @brief  Computes the total plaintext size of all stored files.
  * @param  a Archive.
  * @return Size in bytes.
@@ -220,6 +229,30 @@ uint64_t       archive_wasted_space(archive *a);
  * @return True on success, false otherwise.
  */
 bool           archive_add_file(archive *a, const char *path);
+
+/**
+ * @brief  Encrypts the file at path as a new entry named after its basename and
+ *         writes its chunks to fd starting at position. The entry is not added
+ *         to the index. Used by archive_add_file() and by uploads (append.h).
+ * @param  a        Open archive (its key is used).
+ * @param  path     Path of the file to encrypt.
+ * @param  fd       Destination file descriptor.
+ * @param  position Destination offset, which becomes the offset of the entry.
+ * @param  e        Output: the new entry.
+ * @return True on success, false otherwise (fd may hold partial data).
+ */
+bool           archive_encrypt_file(archive *a, const char *path, int fd, uint64_t position, archive_entry *e);
+
+/**
+ * @brief  Encrypts the current index, optionally with one extra entry at the
+ *         end, without writing it anywhere.
+ * @param  a         Open archive.
+ * @param  extra     Entry appended to the index, or NULL.
+ * @param  blob      Output: nonce followed by the ciphertext (free with free()).
+ * @param  blob_size Output: length of blob.
+ * @return True on success, false otherwise.
+ */
+bool           archive_build_index(archive *a, const archive_entry *extra, unsigned char **blob, uint64_t *blob_size);
 
 /**
  * @brief  Removes the entry at index from the index. Its data remains as

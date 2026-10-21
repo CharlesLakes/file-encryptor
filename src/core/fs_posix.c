@@ -76,6 +76,16 @@ bool fs_replace_file(const char *from, int *from_fd, const char *to, int *to_fd)
   return true;
 }
 
+int fs_temp_file(void){
+  const char *dir = getenv("TMPDIR");
+  char path[PATH_MAX];
+  snprintf(path, sizeof(path), "%s/crls-XXXXXX", dir && dir[0] ? dir : "/tmp");
+  int fd = mkstemp(path);
+  /* The file lives on, nameless, until the descriptor is closed. */
+  if(fd >= 0) unlink(path);
+  return fd;
+}
+
 bool fs_is_separator(char c){
   return c == '/';
 }

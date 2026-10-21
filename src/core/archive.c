@@ -105,13 +105,7 @@ static void remember_path(archive *a, const char *path){
   if(!fs_absolute_path(path, a->path)) snprintf(a->path, sizeof(a->path), "%s", path);
 }
 
-/**
- * @brief  Looks up an entry by name.
- * @param  a    Archive.
- * @param  name File name.
- * @return Index of the entry, or -1 if not found.
- */
-static int find_entry(archive *a, const char *name){
+int archive_find_entry(archive *a, const char *name){
   for(unsigned int i = 0; i < a->entries.n; i++)
     if(strcmp(archive_get_entry(a, i)->name, name) == 0) return (int) i;
   return -1;
@@ -131,17 +125,13 @@ static void set_layout(archive *a, int version){
 
 /* ---------------- Index ---------------- */
 
-/**
- * @brief  Encrypts the index, appends it to the end of fd and then updates
- *         the header to point to it.
- * @param  a  Archive.
- * @param  fd Destination file descriptor.
- * @return True on success, false otherwise.
- */
-static bool write_index_to(archive *a, int fd){
+bool archive_build_index(archive *a, const archive_entry *extra, unsigned char **blob_out, uint64_t *blob_size_out){
+  unsigned int count = a->entries.n + (extra ? 1 : 0);
   uint64_t plain_size = 4;
-  for(unsigned int i = 0; i < a->entries.n; i++)
-    plain_size += 2 + strlen(archive_get_entry(a, i)->name) + 8 + 8 + 8 + STREAM_HEADER;
+  for(unsigned int i = 0; i < count; i++){
+    const archive_entry *e = i < a->entries.n ? archive_get_entry(a, i) : extra;
+    plain_size += 2 + strlen(e->name) + 8 + 8 + 8 + STREAM_HEADER;
+  }
   if(plain_size > MAX_INDEX){
     set_status(true, "There are too many files in the .crls.");
     return false;
@@ -158,10 +148,10 @@ static bool write_index_to(archive *a, int fd){
   }
 
   unsigned char *p = plain;
-  put_le(p, a->entries.n, 4);
+  put_le(p, count, 4);
   p += 4;
-  for(unsigned int i = 0; i < a->entries.n; i++){
-    archive_entry *e = archive_get_entry(a, i);
+  for(unsigned int i = 0; i < count; i++){
+    const archive_entry *e = i < a->entries.n ? archive_get_entry(a, i) : extra;
     size_t name_len = strlen(e->name);
     put_le(p, name_len, 2);
     p += 2;
@@ -180,6 +170,22 @@ static bool write_index_to(archive *a, int fd){
                                              a->header_ad, a->ad_len, NULL, blob, a->key);
   sodium_memzero(plain, plain_size);
   free(plain);
+  *blob_out = blob;
+  *blob_size_out = blob_size;
+  return true;
+}
+
+/**
+ * @brief  Encrypts the index, appends it to the end of fd and then updates
+ *         the header to point to it.
+ * @param  a  Archive.
+ * @param  fd Destination file descriptor.
+ * @return True on success, false otherwise.
+ */
+static bool write_index_to(archive *a, int fd){
+  unsigned char *blob;
+  uint64_t blob_size;
+  if(!archive_build_index(a, NULL, &blob, &blob_size)) return false;
 
   uint64_t end = file_size(fd);
   unsigned char pointer[16];
@@ -188,6 +194,7 @@ static bool write_index_to(archive *a, int fd){
 
   bool ok = write_at(fd, blob, blob_size, end) && fs_sync(fd) &&
             write_at(fd, pointer, sizeof(pointer), a->pointer_pos) && fs_sync(fd);
+  if(ok) memcpy(a->index_nonce, blob, NONCE_BYTES);
   free(blob);
 
   if(!ok){
@@ -340,6 +347,7 @@ static bool load_from_source(archive *a, const char *name, const char *password)
   bool ok = crypto_aead_xchacha20poly1305_ietf_decrypt(plain, &plain_size, NULL,
                                                        blob + NONCE_BYTES, length - NONCE_BYTES,
                                                        header, a->ad_len, blob, a->key) == 0;
+  if(ok) memcpy(a->index_nonce, blob, NONCE_BYTES);
   free(blob);
   clear_entries(a);
   if(ok && !parse_index(a, plain, plain_size, total)){
@@ -463,13 +471,13 @@ bool has_crls_ext(const char *name){
 
 /* ---------------- Modifications ---------------- */
 
-bool archive_add_file(archive *a, const char *path){
+bool archive_encrypt_file(archive *a, const char *path, int fd, uint64_t position, archive_entry *e){
   const char *name = fs_basename(path);
   if(strlen(name) == 0 || strlen(name) > MAX_NAME){
     set_status(true, "Invalid file name.");
     return false;
   }
-  if(find_entry(a, name) >= 0){
+  if(archive_find_entry(a, name) >= 0){
     set_status(true, "There is already a file named %s in the .crls.", name);
     return false;
   }
@@ -481,21 +489,19 @@ bool archive_add_file(archive *a, const char *path){
     set_status(true, "Could not read %s.", path);
     return false;
   }
-  if(fs_same_file(a->fd, fileno(source))){
+  if(a->fd >= 0 && fs_same_file(a->fd, fileno(source))){
     fclose(source);
     set_status(true, "A .crls cannot be added to itself.");
     return false;
   }
 
-  archive_entry e;
-  strcpy(e.name, name);
-  e.size = 0;
-  e.offset = file_size(a->fd);
+  strcpy(e->name, name);
+  e->size = 0;
+  e->offset = position;
 
   crypto_secretstream_xchacha20poly1305_state state;
-  crypto_secretstream_xchacha20poly1305_init_push(&state, e.stream_header, a->key);
+  crypto_secretstream_xchacha20poly1305_init_push(&state, e->stream_header, a->key);
 
-  uint64_t position = e.offset;
   bool ok = true, final = false;
   while(ok && !final){
     size_t n = fread(plain_chunk, 1, CHUNK, source);
@@ -508,18 +514,27 @@ bool archive_add_file(archive *a, const char *path){
                               : crypto_secretstream_xchacha20poly1305_tag_message();
     unsigned long long cipher_size;
     crypto_secretstream_xchacha20poly1305_push(&state, cipher_chunk, &cipher_size, plain_chunk, n, NULL, 0, tag);
-    ok = write_at(a->fd, cipher_chunk, (size_t) cipher_size, position);
+    ok = write_at(fd, cipher_chunk, (size_t) cipher_size, position);
     position += cipher_size;
-    e.size += n;
+    e->size += n;
   }
   fclose(source);
   sodium_memzero(plain_chunk, sizeof(plain_chunk));
   sodium_memzero(&state, sizeof(state));
-  e.stored = position - e.offset;
+  e->stored = position - e->offset;
 
   if(!ok){
-    fs_truncate(a->fd, e.offset);
     set_status(true, "Could not add %s: %s", name, strerror(errno));
+    return false;
+  }
+  return true;
+}
+
+bool archive_add_file(archive *a, const char *path){
+  archive_entry e;
+  uint64_t end = file_size(a->fd);
+  if(!archive_encrypt_file(a, path, a->fd, end, &e)){
+    fs_truncate(a->fd, end);
     return false;
   }
 

@@ -145,6 +145,13 @@ bool fs_replace_file(const char *from, int *from_fd, const char *to, int *to_fd)
   return *to_fd >= 0;
 }
 
+int fs_temp_file(void){
+  char dir[MAX_PATH], path[MAX_PATH];
+  if(!GetTempPathA(sizeof(dir), dir) || !GetTempFileNameA(dir, "crl", 0, path)) return -1;
+  /* _O_TEMPORARY deletes the file when the last descriptor is closed. */
+  return open(path, O_RDWR | O_TRUNC | O_BINARY | _O_TEMPORARY);
+}
+
 bool fs_is_separator(char c){
   return c == '/' || c == '\\';
 }

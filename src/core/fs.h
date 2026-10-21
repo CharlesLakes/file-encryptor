@@ -115,6 +115,12 @@ bool        fs_absolute_path(const char *path, char *out);
 bool        fs_replace_file(const char *from, int *from_fd, const char *to, int *to_fd);
 
 /**
+ * @brief  Creates an anonymous temporary file, deleted when it is closed.
+ * @return Read-write file descriptor, or -1 on error.
+ */
+int         fs_temp_file(void);
+
+/**
  * @brief  Checks whether c separates path components.
  * @param  c Character.
  * @return True for '/' (and '\\' on Windows), false otherwise.

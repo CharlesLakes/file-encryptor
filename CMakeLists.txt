@@ -46,6 +46,7 @@ endif()
 # ---------------- Core (everything except the GUI) ----------------
 
 add_library(crls_core STATIC
+  src/core/append.c
   src/core/archive.c
   src/core/browser.c
   src/core/source.c
@@ -75,6 +76,13 @@ target_link_libraries(file-encryptor PRIVATE crls_core ${GUI_LIBS})
 
 enable_testing()
 
+add_library(test_util STATIC tests/test_util.c)
+target_link_libraries(test_util PUBLIC crls_core)
+
 add_executable(test-archive tests/test_archive.c)
-target_link_libraries(test-archive PRIVATE crls_core)
+target_link_libraries(test-archive PRIVATE test_util)
 add_test(NAME archive COMMAND test-archive ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
+
+add_executable(test-append tests/test_append.c)
+target_link_libraries(test-append PRIVATE test_util)
+add_test(NAME append COMMAND test-append ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures)
