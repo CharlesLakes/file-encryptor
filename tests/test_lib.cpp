@@ -11,6 +11,7 @@
 #include <cstring>
 #include <new>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <fcntl.h>
 #include "core/archive.h"
@@ -93,6 +94,12 @@ int main(){
   CHECK(!other.allocate(SIZE_MAX / 2) && other.size() == 0);
   crls::secret_buffer key;
   CHECK(key.allocate(32) && key.span().size() == 32);
+  crls::secret_buffer moved;
+  moved = std::move(key);
+  CHECK(key.size() == 0 && moved.size() == 32);
+  /* A secret can only move into another buffer that wipes it. */
+  static_assert(!std::is_assignable_v<crls::heap_buffer &, crls::secret_buffer &&>);
+  static_assert(!std::is_constructible_v<crls::heap_buffer, crls::secret_buffer &&>);
 
   /* function_ref: calls the lambda it refers to, which keeps its state. */
   int calls = 0;

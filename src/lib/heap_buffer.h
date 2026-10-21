@@ -31,33 +31,34 @@
 #include <cstddef>
 #include <new>
 #include <span>
+#include <utility>
 #include "deps/sodium.h"
 
 namespace crls{
 
 /**
- * @brief An owned heap array of bytes (empty until allocate() succeeds).
+ * @brief  An owned heap array of bytes (empty until allocate() succeeds).
+ * @tparam Wipe True to wipe the contents with sodium_memzero() before they
+ *         are freed. heap_buffer and secret_buffer are separate types, so a
+ *         secret can never be moved into a buffer that would not wipe it.
  */
-class heap_buffer{
+template<bool Wipe>
+class basic_heap_buffer{
 public:
-  heap_buffer() = default;
-  ~heap_buffer(){ release(); }
+  basic_heap_buffer() = default;
+  ~basic_heap_buffer(){ release(); }
 
-  heap_buffer(const heap_buffer &) = delete;
-  heap_buffer& operator=(const heap_buffer &) = delete;
+  basic_heap_buffer(const basic_heap_buffer &) = delete;
+  basic_heap_buffer& operator=(const basic_heap_buffer &) = delete;
 
-  heap_buffer(heap_buffer &&other) noexcept : data_(other.data_), size_(other.size_), wipe_(other.wipe_){
-    other.data_ = nullptr;
-    other.size_ = 0;
-  }
+  basic_heap_buffer(basic_heap_buffer &&other) noexcept
+    : data_(std::exchange(other.data_, nullptr)), size_(std::exchange(other.size_, 0)) {}
 
-  heap_buffer& operator=(heap_buffer &&other) noexcept{
+  basic_heap_buffer& operator=(basic_heap_buffer &&other) noexcept{
     if(this != &other){
       release();
-      data_ = other.data_;
-      size_ = other.size_;
-      other.data_ = nullptr;
-      other.size_ = 0;
+      data_ = std::exchange(other.data_, nullptr);
+      size_ = std::exchange(other.size_, 0);
     }
     return *this;
   }
@@ -76,9 +77,11 @@ public:
     return true;
   }
 
-  /** @brief Frees the contents, wiping them first for a secret_buffer. */
+  /** @brief Frees the contents, wiping them first if Wipe is true. */
   void release() noexcept{
-    if(data_ && wipe_) sodium_memzero(data_, size_);
+    if constexpr(Wipe){
+      if(data_) sodium_memzero(data_, size_);
+    }
     delete[] data_;
     data_ = nullptr;
     size_ = 0;
@@ -90,23 +93,16 @@ public:
   std::span<unsigned char> span() noexcept{ return {data_, size_}; }
   std::span<const unsigned char> span() const noexcept{ return {data_, size_}; }
 
-protected:
-  /** @brief Used by secret_buffer. */
-  explicit heap_buffer(bool wipe) noexcept : wipe_(wipe) {}
-
 private:
   unsigned char *data_ = nullptr;
   std::size_t size_ = 0;
-  bool wipe_ = false;
 };
 
-/**
- * @brief A heap_buffer that wipes its contents before freeing them.
- */
-class secret_buffer : public heap_buffer{
-public:
-  secret_buffer() noexcept : heap_buffer(true) {}
-};
+/** @brief A heap buffer for data that is not secret. */
+using heap_buffer = basic_heap_buffer<false>;
+
+/** @brief A heap buffer that wipes its contents before freeing them. */
+using secret_buffer = basic_heap_buffer<true>;
 
 }
 
