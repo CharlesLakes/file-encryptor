@@ -83,6 +83,18 @@ static int find_entry(archive *a, const char *name){
   return -1;
 }
 
+/**
+ * @brief Sets the layout fields of a for the given format version.
+ * @param a       Archive.
+ * @param version Format version.
+ */
+static void set_layout(archive *a, int version){
+  a->version = version;
+  a->header_bytes = V2_HEADER_BYTES;
+  a->ad_len = V2_AD_BYTES;
+  a->pointer_pos = V2_AD_BYTES;
+}
+
 /* ---------------- Index ---------------- */
 
 /**
@@ -131,7 +143,7 @@ static bool write_index_to(archive *a, int fd){
 
   randombytes_buf(blob, NONCE_BYTES);
   crypto_aead_xchacha20poly1305_ietf_encrypt(blob + NONCE_BYTES, NULL, plain, plain_size,
-                                             a->header_ad, HEADER_AD_BYTES, NULL, blob, a->key);
+                                             a->header_ad, a->ad_len, NULL, blob, a->key);
   sodium_memzero(plain, plain_size);
   free(plain);
 
@@ -141,7 +153,7 @@ static bool write_index_to(archive *a, int fd){
   put_le(pointer + 8, blob_size, 8);
 
   bool ok = write_at(fd, blob, blob_size, end) && fs_sync(fd) &&
-            write_at(fd, pointer, sizeof(pointer), HEADER_AD_BYTES) && fs_sync(fd);
+            write_at(fd, pointer, sizeof(pointer), a->pointer_pos) && fs_sync(fd);
   free(blob);
 
   if(!ok){
@@ -187,7 +199,7 @@ static bool parse_index(archive *a, const unsigned char *p, uint64_t size, uint6
     memcpy(e.stream_header, p, STREAM_HEADER);
     p += STREAM_HEADER;
 
-    if(e.size > total_size || e.stored != stored_size(e.size) || e.offset < HEADER_BYTES ||
+    if(e.size > total_size || e.stored != stored_size(e.size) || e.offset < a->header_bytes ||
        e.offset > total_size || e.stored > total_size - e.offset) return false;
     push_back_vector(&a->entries, (void *) &e);
   }
@@ -209,12 +221,14 @@ bool archive_crypto_init(void){
 void archive_init(archive *a){
   memset(a, 0, sizeof(*a));
   a->fd = -1;
+  a->src.fd = -1;
   a->entries = create_vector((unsigned int) sizeof(archive_entry));
 }
 
 void archive_close(archive *a){
   clear_entries(a);
   sodium_memzero(a->key, sizeof(a->key));
+  source_close(&a->src);
   if(a->fd >= 0) close(a->fd);
   a->fd = -1;
   a->is_open = false;
@@ -226,47 +240,45 @@ void archive_free(archive *a){
   free_vector(&a->entries);
 }
 
-bool archive_open(archive *a, const char *path, const char *password){
-  int fd = open(path, O_RDWR | O_BINARY);
-  if(fd < 0){
-    set_status(true, "Could not open %s: %s", path, strerror(errno));
-    return false;
-  }
-  if(!fs_lock(fd)){
-    close(fd);
-    set_status(true, "%s is already open in another program.", path);
-    return false;
-  }
-
-  unsigned char header[HEADER_BYTES];
-  uint64_t total = file_size(fd);
-  if(total < HEADER_BYTES || !read_at(fd, header, HEADER_BYTES, 0) || memcmp(header, MAGIC, MAGIC_BYTES) != 0){
-    close(fd);
-    set_status(true, "%s is not a valid .crls file.", path);
+/**
+ * @brief  Reads the header and the index from a->src and decrypts the index.
+ *
+ * On success the key, the layout fields, the entries and the index location
+ * of a are set. On failure a->key is wiped and the status explains why.
+ *
+ * @param  a        Archive whose source is ready.
+ * @param  name     Name of the archive for error messages.
+ * @param  password Password used to derive the key.
+ * @return True on success, false otherwise.
+ */
+static bool load_from_source(archive *a, const char *name, const char *password){
+  unsigned char header[MAX_HEADER_BYTES];
+  uint64_t total = a->src.size(&a->src);
+  if(total < V2_HEADER_BYTES || !a->src.read_at(&a->src, header, V2_HEADER_BYTES, 0) ||
+     memcmp(header, MAGIC, MAGIC_BYTES) != 0){
+    set_status(true, "%s is not a valid .crls file.", name);
     return false;
   }
   if(header[6] != 2 || header[7] != 1){
-    close(fd);
     set_status(true, "Unsupported .crls version (%d).", header[6]);
     return false;
   }
+  set_layout(a, header[6]);
 
   uint64_t ops = get_le(header + 8, 8), mem = get_le(header + 16, 8);
-  uint64_t offset = get_le(header + 40, 8), length = get_le(header + 48, 8);
+  uint64_t offset = get_le(header + a->pointer_pos, 8), length = get_le(header + a->pointer_pos + 8, 8);
   if(ops < 1 || ops > MAX_OPSLIMIT || mem < 8192 || mem > MAX_MEMLIMIT ||
-     offset < HEADER_BYTES || offset > total || length < NONCE_BYTES + TAG_BYTES + 4 ||
+     offset < a->header_bytes || offset > total || length < NONCE_BYTES + TAG_BYTES + 4 ||
      length > NONCE_BYTES + MAX_INDEX + TAG_BYTES || length > total - offset){
-    close(fd);
     set_status(true, "The .crls header is damaged.");
     return false;
   }
 
   unsigned char *blob = (unsigned char *) malloc(length);
   unsigned char *plain = (unsigned char *) malloc(length);
-  if(!blob || !plain || !read_at(fd, blob, length, offset)){
+  if(!blob || !plain || !a->src.read_at(&a->src, blob, length, offset)){
     free(blob);
     free(plain);
-    close(fd);
     set_status(true, "Could not read the .crls index.");
     return false;
   }
@@ -274,7 +286,6 @@ bool archive_open(archive *a, const char *path, const char *password){
   if(!derive_key(a, password, header + 24, ops, mem)){
     free(blob);
     free(plain);
-    close(fd);
     set_status(true, "Not enough memory to derive the key.");
     return false;
   }
@@ -282,7 +293,7 @@ bool archive_open(archive *a, const char *path, const char *password){
   unsigned long long plain_size;
   bool ok = crypto_aead_xchacha20poly1305_ietf_decrypt(plain, &plain_size, NULL,
                                                        blob + NONCE_BYTES, length - NONCE_BYTES,
-                                                       header, HEADER_AD_BYTES, blob, a->key) == 0;
+                                                       header, a->ad_len, blob, a->key) == 0;
   free(blob);
   clear_entries(a);
   if(ok && !parse_index(a, plain, plain_size, total)){
@@ -297,13 +308,34 @@ bool archive_open(archive *a, const char *path, const char *password){
 
   if(!ok){
     sodium_memzero(a->key, sizeof(a->key));
+    return false;
+  }
+
+  memcpy(a->header_ad, header, a->ad_len);
+  a->index_offset = offset;
+  a->index_length = length;
+  return true;
+}
+
+bool archive_open(archive *a, const char *path, const char *password){
+  int fd = open(path, O_RDWR | O_BINARY);
+  if(fd < 0){
+    set_status(true, "Could not open %s: %s", path, strerror(errno));
+    return false;
+  }
+  if(!fs_lock(fd)){
+    close(fd);
+    set_status(true, "%s is already open in another program.", path);
+    return false;
+  }
+
+  source_from_fd(&a->src, fd);
+  if(!load_from_source(a, path, password)){
+    source_close(&a->src);
     close(fd);
     return false;
   }
 
-  memcpy(a->header_ad, header, HEADER_AD_BYTES);
-  a->index_offset = offset;
-  a->index_length = length;
   a->fd = fd;
   a->is_open = true;
   remember_path(a, path);
@@ -311,6 +343,11 @@ bool archive_open(archive *a, const char *path, const char *password){
 }
 
 bool archive_create(archive *a, const char *path, const char *password){
+  return archive_create_params(a, path, password, crypto_pwhash_opslimit_moderate(),
+                               crypto_pwhash_memlimit_moderate());
+}
+
+bool archive_create_params(archive *a, const char *path, const char *password, uint64_t ops, uint64_t mem){
   status_error = false;
   int fd = open(path, O_RDWR | O_CREAT | O_EXCL | O_BINARY, 0600);
   if(fd < 0){
@@ -319,8 +356,8 @@ bool archive_create(archive *a, const char *path, const char *password){
   }
   fs_lock(fd);
 
-  uint64_t ops = crypto_pwhash_opslimit_moderate(), mem = crypto_pwhash_memlimit_moderate();
-  unsigned char header[HEADER_BYTES] = {0};
+  set_layout(a, 2);
+  unsigned char header[MAX_HEADER_BYTES] = {0};
   memcpy(header, MAGIC, MAGIC_BYTES);
   header[6] = 2;
   header[7] = 1;
@@ -336,8 +373,8 @@ bool archive_create(archive *a, const char *path, const char *password){
   }
 
   clear_entries(a);
-  memcpy(a->header_ad, header, HEADER_AD_BYTES);
-  if(!write_at(fd, header, HEADER_BYTES, 0) || !write_index_to(a, fd)){
+  memcpy(a->header_ad, header, a->ad_len);
+  if(!write_at(fd, header, a->header_bytes, 0) || !write_index_to(a, fd)){
     if(!status_error) set_status(true, "Could not write %s: %s", path, strerror(errno));
     sodium_memzero(a->key, sizeof(a->key));
     close(fd);
@@ -346,6 +383,7 @@ bool archive_create(archive *a, const char *path, const char *password){
   }
 
   a->fd = fd;
+  source_from_fd(&a->src, fd);
   a->is_open = true;
   remember_path(a, path);
   return true;
@@ -364,9 +402,9 @@ uint64_t archive_total_size(archive *a){
 }
 
 uint64_t archive_wasted_space(archive *a){
-  uint64_t used = HEADER_BYTES + a->index_length;
+  uint64_t used = a->header_bytes + a->index_length;
   for(unsigned int i = 0; i < a->entries.n; i++) used += archive_get_entry(a, i)->stored;
-  uint64_t total = file_size(a->fd);
+  uint64_t total = a->src.size(&a->src);
   return total > used ? total - used : 0;
 }
 
@@ -480,11 +518,11 @@ bool archive_compact(archive *a){
     return false;
   }
 
-  unsigned char header[HEADER_BYTES] = {0};
-  memcpy(header, a->header_ad, HEADER_AD_BYTES);
-  bool ok = write_at(fd, header, HEADER_BYTES, 0);
+  unsigned char header[MAX_HEADER_BYTES] = {0};
+  memcpy(header, a->header_ad, a->ad_len);
+  bool ok = write_at(fd, header, a->header_bytes, 0);
 
-  uint64_t position = HEADER_BYTES;
+  uint64_t position = a->header_bytes;
   uint64_t *old_offsets = (uint64_t *) malloc(sizeof(uint64_t) * (a->entries.n ? a->entries.n : 1));
   ok = ok && old_offsets;
   for(unsigned int i = 0; ok && i < a->entries.n; i++){
@@ -492,7 +530,7 @@ bool archive_compact(archive *a){
     old_offsets[i] = e->offset;
     for(uint64_t copied = 0; ok && copied < e->stored; ){
       size_t n = e->stored - copied < sizeof(cipher_chunk) ? (size_t) (e->stored - copied) : sizeof(cipher_chunk);
-      ok = read_at(a->fd, cipher_chunk, n, e->offset + copied) &&
+      ok = a->src.read_at(&a->src, cipher_chunk, n, e->offset + copied) &&
            write_at(fd, cipher_chunk, n, position + copied);
       copied += n;
     }
@@ -513,13 +551,16 @@ bool archive_compact(archive *a){
     if(a->fd < 0){
       archive_close(a);
       set_status(true, "Could not reopen the archive after compacting.");
-    }else if(!status_error){
-      set_status(true, "Could not compact: %s", strerror(errno));
+      return false;
     }
+    /* On Windows the descriptor may have been reopened. */
+    source_from_fd(&a->src, a->fd);
+    if(!status_error) set_status(true, "Could not compact: %s", strerror(errno));
     return false;
   }
 
   free(old_offsets);
+  source_from_fd(&a->src, a->fd);
   return true;
 }
 
@@ -551,7 +592,7 @@ int archive_extract_entry(archive *a, unsigned int index, const char *dir){
     size_t n = left < sizeof(cipher_chunk) ? (size_t) left : sizeof(cipher_chunk);
     unsigned long long plain_size;
     unsigned char tag;
-    if(n < STREAM_ABYTES || !read_at(a->fd, cipher_chunk, n, e->offset + consumed) ||
+    if(n < STREAM_ABYTES || !a->src.read_at(&a->src, cipher_chunk, n, e->offset + consumed) ||
        crypto_secretstream_xchacha20poly1305_pull(&state, plain_chunk, &plain_size, &tag,
                                                   cipher_chunk, n, NULL, 0) != 0){
       ok = false;

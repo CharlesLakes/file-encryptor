@@ -191,7 +191,8 @@ int main(int argc, char **argv){
   archive_init(&a);
 
   /* Create and add. */
-  CHECK(archive_create(&a, crls, "password123"));
+  /* Low Argon2id limits keep the test fast; archive_create() uses "moderate". */
+  CHECK(archive_create_params(&a, crls, "password123", 1, 8u << 20));
   const char *names[] = {"empty.bin", "small.txt", "exact.bin", "big.bin"};
   for(int i = 0; i < 4; i++){
     path_in(file, names[i]);

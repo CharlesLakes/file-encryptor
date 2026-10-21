@@ -62,6 +62,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <limits.h>
+#include "core/source.h"
 #include "lib/vector.h"
 
 #define MAGIC           "CRLS\0\0"        /**< Magic number at the start of every archive. */
@@ -72,8 +73,10 @@
 #define TAG_BYTES       16                /**< AEAD authentication tag length. */
 #define STREAM_HEADER   24                /**< Secretstream header length. */
 #define STREAM_ABYTES   17                /**< Secretstream overhead per chunk. */
-#define HEADER_BYTES    64                /**< Total archive header length. */
-#define HEADER_AD_BYTES 40                /**< Header bytes used as associated data. */
+#define V2_HEADER_BYTES 64                /**< Header length of format version 2. */
+#define V2_AD_BYTES     40                /**< Associated data length of version 2. */
+#define MAX_HEADER_BYTES 64               /**< Largest header of any supported version. */
+#define MAX_AD_BYTES    40                /**< Largest associated data of any version. */
 #define CHUNK           (64 * 1024)       /**< Plaintext chunk size. */
 #define MAX_NAME        255               /**< Maximum length of a stored file name. */
 #define MAX_PASSWORD    128               /**< Maximum password length. */
@@ -98,11 +101,16 @@ typedef struct{
  */
 typedef struct{
   bool is_open;                                /**< True while an archive is open. */
-  int fd;                                      /**< File descriptor, held under an exclusive flock. */
-  char path[PATH_MAX];                         /**< Absolute path of the archive. */
+  int fd;                                      /**< File descriptor, held under an exclusive lock (local only). */
+  archive_source src;                          /**< Where every read comes from. */
+  char path[PATH_MAX];                         /**< Absolute path or URL of the archive. */
   vector entries;                              /**< archive_entry elements, in index order. */
   unsigned char key[KEY_BYTES];                /**< Derived encryption key. */
-  unsigned char header_ad[HEADER_AD_BYTES];    /**< First 40 header bytes (associated data). */
+  int version;                                 /**< Format version of the open archive. */
+  unsigned int header_bytes;                   /**< Header length of that version. */
+  unsigned int ad_len;                         /**< Header bytes used as associated data. */
+  unsigned int pointer_pos;                    /**< Offset of the index offset and length. */
+  unsigned char header_ad[MAX_AD_BYTES];       /**< Associated data (start of the header). */
   uint64_t index_offset, index_length;         /**< Location of the current index. */
 }archive;
 
@@ -149,6 +157,19 @@ bool           archive_open(archive *a, const char *path, const char *password);
  * @return True on success, false otherwise.
  */
 bool           archive_create(archive *a, const char *path, const char *password);
+
+/**
+ * @brief  Same as archive_create() with explicit Argon2id limits. Low limits
+ *         are only meant for tests.
+ * @param  a        Archive.
+ * @param  path     Path of the new .crls file.
+ * @param  password Password used to derive the key.
+ * @param  ops      Argon2id operations limit (1 to MAX_OPSLIMIT).
+ * @param  mem      Argon2id memory limit in bytes (8192 to MAX_MEMLIMIT).
+ * @return True on success, false otherwise.
+ */
+bool           archive_create_params(archive *a, const char *path, const char *password,
+                                     uint64_t ops, uint64_t mem);
 
 /**
  * @brief  Returns the entry at index. No bounds checking is performed.

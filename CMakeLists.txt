@@ -48,6 +48,7 @@ endif()
 add_library(crls_core STATIC
   src/core/archive.c
   src/core/browser.c
+  src/core/source.c
   src/core/status.c
   src/core/util.c
   ${FS_SRC}
