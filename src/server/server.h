@@ -49,29 +49,31 @@
 #ifndef SERVER_SERVER_H
 #define SERVER_SERVER_H
 
-#include <stdint.h>
+#include <atomic>
+#include <cstdint>
+#include <string>
 
 namespace crls{
 
 /**
  * @brief Settings of a server.
  */
-typedef struct{
-  const char *dir;                 /**< Folder with the .crls files. */
-  const char *bind;                /**< Address to listen on. */
-  int port;                        /**< Port, or 0 for any free port. */
-  uint64_t max_upload;             /**< Largest accepted POST body in bytes. */
-  int timeout;                     /**< Seconds a request may take before its body. */
-  const char *port_file;           /**< If set, the bound port is written to this file. */
-  volatile int *stop;              /**< If set and non-zero, the server stops after the current connection. */
-}server_config;
+struct server_config{
+  std::string dir;                             /**< Folder with the .crls files (absolute). */
+  std::string bind = "127.0.0.1";              /**< Address to listen on. */
+  int port = 8080;                             /**< Port, or 0 for any free port. */
+  uint64_t max_upload = 1ULL << 30;            /**< Largest accepted POST body in bytes. */
+  int timeout = 15;                            /**< Seconds a request may take before its body. */
+  std::string port_file;                       /**< If not empty, the bound port is written to this file. */
+  const std::atomic<bool> *stop = nullptr;     /**< If set and true, the server stops after the current connection. */
+};
 
 /**
- * @brief  Serves requests until cfg->stop becomes non-zero (forever if NULL).
+ * @brief  Serves requests until cfg.stop becomes true (forever if it is null).
  * @param  cfg Settings.
  * @return Process exit code: 0 after a requested stop, 1 on a startup error.
  */
-int server_run(const server_config *cfg);
+int server_run(const server_config &cfg);
 
 /**
  * @brief  Parses `--server <folder> [--port N] [--bind ADDR] [--max-upload BYTES]

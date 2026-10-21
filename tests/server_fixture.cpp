@@ -8,6 +8,7 @@
 
 #include "server_fixture.h"
 
+#include <atomic>
 #include <stdio.h>
 #include <unistd.h>
 #include "core/net.h"
@@ -25,7 +26,7 @@ static pthread_t thread;
 #endif
 
 static server_config cfg;
-static volatile int stop_flag = 0;
+static std::atomic<bool> stop_flag(false);
 static char port_file[PATH_MAX];
 static int port = 0;
 
@@ -33,13 +34,13 @@ static int port = 0;
 #ifdef _WIN32
 static DWORD WINAPI server_thread(LPVOID arg){
   (void) arg;
-  server_run(&cfg);
+  server_run(cfg);
   return 0;
 }
 #else
 static void* server_thread(void *arg){
   (void) arg;
-  server_run(&cfg);
+  server_run(cfg);
   return NULL;
 }
 #endif
@@ -48,10 +49,10 @@ int start_test_server(const char *dir){
   net_init();
   path_in(port_file, "server.port");
   remove(port_file);
-  stop_flag = 0;
+  stop_flag = false;
   port = 0;
+  cfg = server_config();
   cfg.dir = dir;
-  cfg.bind = "127.0.0.1";
   cfg.port = 0;
   cfg.max_upload = 64ULL << 20;
   cfg.timeout = 5;
@@ -75,7 +76,7 @@ int start_test_server(const char *dir){
 
 void stop_test_server(void){
   /* accept() is blocking: set the flag, then wake it up with a connection. */
-  stop_flag = 1;
+  stop_flag = true;
   unique_socket s = net_connect("127.0.0.1", port);
   if(s){
     net_send_all(s.get(), "HEAD / HTTP/1.1\r\n\r\n", 19);

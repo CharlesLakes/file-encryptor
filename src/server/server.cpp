@@ -29,11 +29,8 @@
 
 namespace crls{
 
-#define DEFAULT_PORT       8080
-#define DEFAULT_BIND       "127.0.0.1"
-#define DEFAULT_MAX_UPLOAD (1ULL << 30)
-#define DEFAULT_TIMEOUT    15
-#define MIN_BODY_RATE      (16 * 1024)   /**< Slowest accepted upload, in bytes per second. */
+/** @brief Slowest accepted upload, in bytes per second. */
+inline constexpr uint64_t MIN_BODY_RATE = 16 * 1024;
 
 /** @brief Scratch buffer used to stream archives. */
 static unsigned char send_chunk[CHUNK];
@@ -130,9 +127,9 @@ static bool if_match_ok(const http_request *req, const char *etag){
  * @param  head_only True for HEAD.
  * @return Status code.
  */
-static int serve_listing(const server_config *cfg, net_socket s, bool head_only){
+static int serve_listing(const server_config &cfg, net_socket s, bool head_only){
   browser b;
-  b.set_dir(cfg->dir);
+  b.set_dir(cfg.dir);
   b.load();
 
   /* The size depends on the folder, so the allocation is checked. */
@@ -161,10 +158,10 @@ static int serve_listing(const server_config *cfg, net_socket s, bool head_only)
  * @param  head_only True for HEAD.
  * @return Status code.
  */
-static int serve_archive(const server_config *cfg, net_socket s, const http_request *req,
+static int serve_archive(const server_config &cfg, net_socket s, const http_request *req,
                          const char *name, bool head_only){
   char path[PATH_MAX], etag[80], extra[512];
-  join_path(path, sizeof(path), cfg->dir, name);
+  join_path(path, sizeof(path), cfg.dir.c_str(), name);
   unique_fd fd = fs_open_regular(path, false);
   if(!fd) return send_error(s, 404, "", head_only);
   if(!make_etag(fd.get(), etag, sizeof(etag))){
@@ -289,15 +286,15 @@ static int append_status(append_result r){
  * @param  pending_len Number of pending bytes.
  * @return Status code.
  */
-static int serve_append(const server_config *cfg, net_socket s, const http_request *req, const char *name,
+static int serve_append(const server_config &cfg, net_socket s, const http_request *req, const char *name,
                         const char *pending, size_t pending_len){
   append_claim claim;
   if(!req->has_length) return send_error(s, 411, "", false);
   if(!read_claim(req, &claim)) return send_error(s, 400, "", false);
-  if(claim.content_length > cfg->max_upload) return send_error(s, 413, "", false);
+  if(claim.content_length > cfg.max_upload) return send_error(s, 413, "", false);
 
   char path[PATH_MAX], etag[80];
-  join_path(path, sizeof(path), cfg->dir, name);
+  join_path(path, sizeof(path), cfg.dir.c_str(), name);
   unique_fd fd = fs_open_regular(path, true);
   if(!fd) return send_error(s, 404, "", false);
   if(!make_etag(fd.get(), etag, sizeof(etag)) || !if_match_ok(req, etag)){
@@ -309,12 +306,12 @@ static int serve_append(const server_config *cfg, net_socket s, const http_reque
 
   append_state st;
   append_result r = append_load_state(fd.get(), st);
-  if(r == append_result::ok) r = append_check(st, claim, cfg->max_upload);
+  if(r == append_result::ok) r = append_check(st, claim, cfg.max_upload);
   if(r == append_result::ok){
     if(http_header_value(*req, "Expect") == std::optional<std::string_view>("100-continue"))
       net_send_all(s, "HTTP/1.1 100 Continue\r\n\r\n", 25);
     body_reader reader(s, std::string_view(pending, pending_len),
-                       time(NULL) + cfg->timeout + static_cast<time_t>(claim.content_length / MIN_BODY_RATE));
+                       time(NULL) + cfg.timeout + static_cast<time_t>(claim.content_length / MIN_BODY_RATE));
     r = append_commit(fd.get(), claim, reader);
   }
   return send_error(s, append_status(r), "", false);
@@ -330,12 +327,12 @@ static int serve_append(const server_config *cfg, net_socket s, const http_reque
  * @param  target Output: target, for logging.
  * @return Status code, or 0 if nothing could be answered.
  */
-static int handle_connection(const server_config *cfg, net_socket s, char *method, char *target){
+static int handle_connection(const server_config &cfg, net_socket s, char *method, char *target){
   static char head[http_max_head];
   http_request req;
   http_parse parsed = http_parse::incomplete;
   size_t len = 0;
-  time_t deadline = time(NULL) + cfg->timeout;
+  time_t deadline = time(NULL) + cfg.timeout;
 
   while(parsed == http_parse::incomplete){
     if(len == sizeof(head)){
@@ -368,31 +365,31 @@ static int handle_connection(const server_config *cfg, net_socket s, char *metho
   return serve_archive(cfg, s, &req, name.c_str(), head_only);
 }
 
-int server_run(const server_config *cfg){
+int server_run(const server_config &cfg){
   if(!net_init()){
     fprintf(stderr, "Could not initialize the network.\n");
     return 1;
   }
   int port = 0;
-  unique_socket listener = net_listen(cfg->bind, cfg->port, &port);
+  unique_socket listener = net_listen(cfg.bind.c_str(), cfg.port, &port);
   if(!listener){
-    fprintf(stderr, "Could not listen on %s port %d.\n", cfg->bind, cfg->port);
+    fprintf(stderr, "Could not listen on %s port %d.\n", cfg.bind.c_str(), cfg.port);
     return 1;
   }
-  if(cfg->port_file){
-    FILE *f = fopen(cfg->port_file, "w");
+  if(!cfg.port_file.empty()){
+    FILE *f = fopen(cfg.port_file.c_str(), "w");
     if(f){
       fprintf(f, "%d\n", port);
       fclose(f);
     }
   }
-  printf("Serving %s on http://%s:%d/\n", cfg->dir, cfg->bind, port);
+  printf("Serving %s on http://%s:%d/\n", cfg.dir.c_str(), cfg.bind.c_str(), port);
   fflush(stdout);
 
-  while(!cfg->stop || !*cfg->stop){
+  while(!cfg.stop || !cfg.stop->load()){
     unique_socket s = net_accept(listener.get());
     if(!s) continue;
-    net_set_timeout(s.get(), cfg->timeout);
+    net_set_timeout(s.get(), cfg.timeout);
     char method[16] = "-", target[256] = "-";
     int status = handle_connection(cfg, s.get(), method, target);
     s = unique_socket();
@@ -405,25 +402,24 @@ int server_run(const server_config *cfg){
 /**
  * @brief Prints the usage of the server options.
  */
-static void server_usage(void){
+static void server_usage(){
+  const server_config defaults;
   fprintf(stderr, "usage: file-encryptor --server <folder> [--port N] [--bind ADDRESS]\n"
                   "                      [--max-upload BYTES] [--timeout SECONDS] [--port-file PATH]\n"
                   "defaults: --port %d --bind %s --max-upload %llu --timeout %d\n",
-          DEFAULT_PORT, DEFAULT_BIND, (unsigned long long) DEFAULT_MAX_UPLOAD, DEFAULT_TIMEOUT);
+          defaults.port, defaults.bind.c_str(), static_cast<unsigned long long>(defaults.max_upload), defaults.timeout);
 }
 
 int server_main(int argc, char **argv){
-  static std::string dir;
-  server_config cfg = {NULL, DEFAULT_BIND, DEFAULT_PORT, DEFAULT_MAX_UPLOAD, DEFAULT_TIMEOUT, NULL, NULL};
+  server_config cfg;
   if(argc < 2){
     server_usage();
     return 2;
   }
-  if(!fs_absolute_path(argv[1], dir)){
+  if(!fs_absolute_path(argv[1], cfg.dir)){
     fprintf(stderr, "Could not find the folder %s.\n", argv[1]);
     return 2;
   }
-  cfg.dir = dir.c_str();
 
   /* Every option takes a value: they come in pairs. */
   for(int i = 2; i < argc; i += 2){
@@ -441,7 +437,7 @@ int server_main(int argc, char **argv){
       return 2;
     }
   }
-  return server_run(&cfg);
+  return server_run(cfg);
 }
 
 }
